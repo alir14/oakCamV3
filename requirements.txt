@@ -1,0 +1,23 @@
+# OAK Camera Viewer Dependencies
+
+# Core DepthAI library (Release Candidate 2)
+depthai==3.0.0rc2
+
+# Computer Vision and Image Processing
+opencv-python>=4.8.0,<4.11.0
+numpy>=1.21.0,<2.0.0
+
+# GUI Framework Support
+Pillow>=9.0.0,<11.0.0
+
+# Python Standard Library Extensions
+typing-extensions>=4.0.0; python_version<"3.10"
+
+# Optional: For better error reporting
+colorama>=0.4.4
+
+# Development dependencies (uncomment if needed)
+# black>=22.0.0
+# flake8>=4.0.0
+# pytest>=7.0.0
+# mypy>=0.910
