@@ -214,10 +214,30 @@ class OAKCameraViewer:
 
             print(f"Connection successful: {message}")
 
-            # Setup pipeline with current settings
-            width = self.control_panel.widgets["width_var"].get()
-            height = self.control_panel.widgets["height_var"].get()
-            fps = self.control_panel.widgets["fps_var"].get()
+            # Setup pipeline with current settings - updated for new resolution format
+            resolution_str = self.control_panel.widgets["resolution_var"].get()
+            fps_str = self.control_panel.widgets["fps_var"].get()
+
+            # Parse resolution from dropdown
+            try:
+                if "x" in resolution_str:
+                    width_str, height_str = resolution_str.split("x")
+                    width = int(width_str.strip())
+                    height = int(height_str.strip())
+                else:
+                    # Fallback to default resolution
+                    width, height = 1280, 720
+                    print(
+                        f"Warning: Could not parse resolution '{resolution_str}', using default 1280x720"
+                    )
+
+                fps = int(fps_str)
+            except (ValueError, AttributeError) as e:
+                # Fallback to default settings
+                width, height, fps = 1280, 720, 30
+                print(
+                    f"Warning: Could not parse settings, using defaults: {width}x{height}@{fps}fps"
+                )
 
             print(f"Setting up pipeline: {width}x{height}@{fps}fps")
 
@@ -378,9 +398,25 @@ class OAKCameraViewer:
                 messagebox.showwarning("Warning", "No cameras available")
                 return
 
-            width = self.control_panel.widgets["width_var"].get()
-            height = self.control_panel.widgets["height_var"].get()
-            fps = self.control_panel.widgets["fps_var"].get()
+            # Parse current resolution and fps settings
+            try:
+                resolution_str = self.control_panel.widgets["resolution_var"].get()
+                fps_str = self.control_panel.widgets["fps_var"].get()
+
+                if "x" in resolution_str:
+                    width_str, height_str = resolution_str.split("x")
+                    width = int(width_str.strip())
+                    height = int(height_str.strip())
+                else:
+                    width, height = 1280, 720
+
+                fps = int(fps_str)
+            except (ValueError, KeyError):
+                # Fallback to default settings
+                width, height, fps = 1280, 720, 30
+                print(
+                    f"Warning: Using default recording settings: {width}x{height}@{fps}fps"
+                )
 
             success, message = self.file_manager.start_video_recording(
                 camera_names, width, height, fps
@@ -428,6 +464,17 @@ class OAKCameraViewer:
                     "resolution_height", settings["height"]
                 )
                 self.settings_manager.update_setting("fps", settings["fps"])
+
+                # Update the control panel's resolution dropdown
+                resolution_str = f"{settings['width']}x{settings['height']}"
+                if "resolution_var" in self.control_panel.widgets:
+                    # Add to options if not present
+                    if resolution_str not in self.control_panel.resolution_options:
+                        self.control_panel.resolution_options.append(resolution_str)
+                    self.control_panel.widgets["resolution_var"].set(resolution_str)
+
+                if "fps_var" in self.control_panel.widgets:
+                    self.control_panel.widgets["fps_var"].set(str(settings["fps"]))
 
                 # Reconnect
                 self.disconnect_camera()
