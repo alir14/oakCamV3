@@ -1,153 +1,126 @@
 import sys
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox, filedialog
 import threading
 import time
 from pathlib import Path
 from typing import Dict, Optional
+import subprocess
+import platform
 
 # Import our custom modules
 from camera.controller import CameraController
 from camera.settings import CameraSettingsManager
 from utils.file_manager import FileManager
-from ui.display import DisplayManager
-from ui.controls import ControlPanel
+from ui.display import UIManager, MenuBarManager, StatusBarManager, DisplayManager
+from ui.controls import QuickActionsMenu, ControlPanel
 
 
 class OAKCameraViewer:
-    """Main application class that orchestrates all components"""
+    """Main application class with proper separation of UI components"""
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("OAK PoE Camera Viewer - DepthAI V3")
-        self.root.geometry("1400x900")
-        self.root.minsize(1200, 800)
 
-        # Initialize components
+        # Initialize backend components
         self.camera_controller = CameraController()
         self.settings_manager = CameraSettingsManager(self.camera_controller)
         self.file_manager = FileManager()
 
-        # UI components (will be initialized in setup_ui)
+        # Initialize UI components
+        self.ui_manager = UIManager(root)
+        self.quick_actions: Optional[QuickActionsMenu] = None
         self.control_panel: Optional[ControlPanel] = None
-        self.display_manager: Optional[DisplayManager] = None
-        self.notebook: Optional[ttk.Notebook] = None
 
         # Application state
         self.connected = False
         self.status_thread: Optional[threading.Thread] = None
         self.status_running = False
 
-        # Setup UI and event handlers
-        self.setup_ui()
-        self.setup_event_handlers()
+        # Setup application
+        self.setup_application()
 
-        # Start status monitoring
+    def setup_application(self):
+        """Setup the complete application"""
+        # Setup main UI structure
+        self.ui_manager.setup_main_ui()
+        self.ui_manager.set_window_properties(
+            title="OAK PoE Camera Viewer - DepthAI V3",
+            geometry="1600x1000",
+            min_size=(1400, 900),
+        )
+
+        # Setup UI components
+        self.setup_ui_components()
+
+        # Setup event handlers and callbacks
+        self.setup_callbacks()
+
+        # Setup keyboard shortcuts
+        self.setup_keyboard_shortcuts()
+
+        # Start background monitoring
         self.start_status_monitoring()
 
-    def setup_ui(self):
-        """Setup the main user interface"""
-        # Configure style
-        style = ttk.Style()
-        style.theme_use("clam")  # Modern looking theme
+        # Center window
+        self.ui_manager.center_window()
 
-        # Main container
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    def setup_ui_components(self):
+        """Setup all UI components with proper separation"""
+        # Setup quick actions menu in top frame
+        self.quick_actions = QuickActionsMenu(self.ui_manager.get_top_frame())
 
-        # Create paned window for resizable panels
-        paned_window = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
-        paned_window.pack(fill=tk.BOTH, expand=True)
-
-        # Left panel for controls (fixed width)
-        control_frame = ttk.LabelFrame(paned_window, text="Camera Controls", padding=10)
-        control_frame.configure(width=300)
-        paned_window.add(control_frame, weight=0)
-
-        # Right panel for camera displays (expandable)
-        display_frame = ttk.Frame(paned_window)
-        paned_window.add(display_frame, weight=1)
-
-        # Setup control panel
-        self.control_panel = ControlPanel(control_frame, self.settings_manager)
-
-        # Setup display area
-        self.notebook = ttk.Notebook(display_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
-        self.display_manager = DisplayManager(self.notebook)
-
-        # Add menu bar
-        self.setup_menu_bar()
-
-        # Add status bar
-        self.setup_status_bar()
-
-    def setup_menu_bar(self):
-        """Setup application menu bar"""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-
-        # File menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(
-            label="Open Save Directory", command=self.open_save_directory
-        )
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.on_closing)
-
-        # Camera menu
-        camera_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Camera", menu=camera_menu)
-        camera_menu.add_command(label="Connect", command=self.connect_camera)
-        camera_menu.add_command(label="Disconnect", command=self.disconnect_camera)
-        camera_menu.add_separator()
-        camera_menu.add_command(
-            label="Reset Settings", command=self.reset_camera_settings
+        # Setup control panel in left frame
+        self.control_panel = ControlPanel(
+            self.ui_manager.get_control_frame(), self.settings_manager
         )
 
-        # View menu
-        view_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="View", menu=view_menu)
-        view_menu.add_command(label="Refresh Displays", command=self.refresh_displays)
-
-        # Help menu
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="About", command=self.show_about)
-
-    def setup_status_bar(self):
-        """Setup status bar at bottom"""
-        self.status_bar = ttk.Frame(self.root)
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=2)
-
-        self.status_text = ttk.Label(self.status_bar, text="Ready", relief=tk.SUNKEN)
-        self.status_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        # Recording indicator
-        self.recording_indicator = ttk.Label(self.status_bar, text="", relief=tk.SUNKEN)
-        self.recording_indicator.pack(side=tk.RIGHT, padx=5)
-
-    def setup_event_handlers(self):
-        """Setup event handlers for UI components"""
-        if self.control_panel:
-            self.control_panel.set_callbacks(
+    def setup_callbacks(self):
+        """Setup all callback functions"""
+        # Quick actions callbacks
+        if self.quick_actions:
+            self.quick_actions.set_callbacks(
                 connect=self.connect_camera,
                 disconnect=self.disconnect_camera,
                 capture=self.capture_images,
                 record_toggle=self.toggle_recording,
                 save_dir_change=self.set_save_directory,
-                settings_change=self.apply_stream_settings,
+                reset_settings=self.reset_camera_settings,
+            )
+
+        # Control panel callbacks
+        if self.control_panel:
+            self.control_panel.set_callbacks(settings_change=self.apply_stream_settings)
+
+        # Menu bar callbacks
+        if self.ui_manager.get_menu_bar():
+            self.ui_manager.get_menu_bar().set_callbacks(
+                open_save_dir=self.open_save_directory,
+                connect=self.connect_camera,
+                disconnect=self.disconnect_camera,
+                capture=self.capture_images,
+                record_toggle=self.toggle_recording,
+                reset_settings=self.reset_camera_settings,
+                refresh_displays=self.refresh_displays,
+                show_shortcuts=self.show_shortcuts,
+                show_about=self.show_about,
+                exit=self.on_closing,
             )
 
         # Window close handler
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.ui_manager.set_close_handler(self.on_closing)
 
-        # Keyboard shortcuts
-        self.root.bind("<Control-c>", lambda e: self.capture_images())
-        self.root.bind("<Control-r>", lambda e: self.toggle_recording())
-        self.root.bind("<Control-q>", lambda e: self.on_closing())
-        self.root.bind("<F5>", lambda e: self.refresh_displays())
+    def setup_keyboard_shortcuts(self):
+        """Setup keyboard shortcuts"""
+        shortcuts = {
+            "<Control-c>": self.capture_images,
+            "<Control-r>": self.toggle_recording,
+            "<Control-d>": self.disconnect_camera,
+            "<Control-n>": self.connect_camera,
+            "<Control-q>": self.on_closing,
+            "<F5>": self.refresh_displays,
+        }
+        self.ui_manager.setup_keyboard_shortcuts(shortcuts)
 
     def start_status_monitoring(self):
         """Start background status monitoring"""
@@ -162,11 +135,11 @@ class OAKCameraViewer:
         while self.status_running:
             try:
                 # Update disk space info
-                if self.control_panel:
-                    free_gb, total_gb = self.file_manager.get_available_space()
+                free_gb, total_gb = self.file_manager.get_available_space()
+                if self.quick_actions:
                     self.root.after(
                         0,
-                        lambda: self.control_panel.update_disk_space_display(
+                        lambda: self.quick_actions.update_disk_space_display(
                             free_gb, total_gb
                         ),
                     )
@@ -174,15 +147,30 @@ class OAKCameraViewer:
                 # Update recording duration
                 if self.file_manager.is_recording():
                     duration = self.file_manager.get_recording_duration()
-                    self.root.after(
-                        0,
-                        lambda: self.control_panel.update_recording_duration(duration),
-                    )
-                    self.root.after(
-                        0, lambda: self.update_status(f"Recording... {duration:.1f}s")
-                    )
+                    if self.quick_actions:
+                        self.root.after(
+                            0,
+                            lambda: self.quick_actions.update_recording_status(
+                                True, duration
+                            ),
+                        )
+                    if self.ui_manager.get_status_bar():
+                        self.root.after(
+                            0,
+                            lambda: self.ui_manager.get_status_bar().update_status(
+                                f"Recording... {duration:.1f}s"
+                            ),
+                        )
 
-                time.sleep(1.0)  # Update every second
+                # Update FPS if connected
+                if self.connected and self.ui_manager.get_display_manager():
+                    fps = self.ui_manager.get_display_manager().get_current_fps()
+                    if self.ui_manager.get_status_bar():
+                        self.root.after(
+                            0, lambda: self.ui_manager.get_status_bar().update_fps(fps)
+                        )
+
+                time.sleep(1.0)
 
             except Exception as e:
                 print(f"Status monitoring error: {e}")
@@ -195,8 +183,12 @@ class OAKCameraViewer:
             return
 
         self.update_status("Connecting to camera...")
+        if self.quick_actions:
+            self.quick_actions.widgets["connection_status_label"].config(
+                text="● Connecting...", foreground="orange"
+            )
 
-        # Run connection in separate thread to avoid blocking UI
+        # Run connection in separate thread
         threading.Thread(target=self._connect_camera_thread, daemon=True).start()
 
     def _connect_camera_thread(self):
@@ -210,65 +202,62 @@ class OAKCameraViewer:
                     0, lambda: messagebox.showerror("Connection Error", message)
                 )
                 self.root.after(0, lambda: self.update_status("Connection failed"))
+                self.root.after(
+                    0,
+                    lambda: (
+                        self.quick_actions.update_connection_status(False)
+                        if self.quick_actions
+                        else None
+                    ),
+                )
                 return
 
             print(f"Connection successful: {message}")
 
-            # Setup pipeline with current settings - updated for new resolution format
-            resolution_str = self.control_panel.widgets["resolution_var"].get()
-            fps_str = self.control_panel.widgets["fps_var"].get()
+            # Get current settings for pipeline setup
+            current_settings = {"width": 1280, "height": 720, "fps": 30}
+            if self.control_panel:
+                current_settings = self.control_panel.get_current_settings()
 
-            # Parse resolution from dropdown
-            try:
-                if "x" in resolution_str:
-                    width_str, height_str = resolution_str.split("x")
-                    width = int(width_str.strip())
-                    height = int(height_str.strip())
-                else:
-                    # Fallback to default resolution
-                    width, height = 1280, 720
-                    print(
-                        f"Warning: Could not parse resolution '{resolution_str}', using default 1280x720"
-                    )
+            print(
+                f"Setting up pipeline: {current_settings['width']}x{current_settings['height']}@{current_settings['fps']}fps"
+            )
 
-                fps = int(fps_str)
-            except (ValueError, AttributeError) as e:
-                # Fallback to default settings
-                width, height, fps = 1280, 720, 30
-                print(
-                    f"Warning: Could not parse settings, using defaults: {width}x{height}@{fps}fps"
-                )
-
-            print(f"Setting up pipeline: {width}x{height}@{fps}fps")
-
-            if not self.camera_controller.setup_pipeline(width, height, fps):
-                error_msg = (
-                    "Failed to setup camera pipeline. Check console for details."
-                )
+            if not self.camera_controller.setup_pipeline(
+                current_settings["width"],
+                current_settings["height"],
+                current_settings["fps"],
+            ):
+                error_msg = "Failed to setup camera pipeline."
                 print("Pipeline setup failed")
                 self.root.after(
                     0, lambda: messagebox.showerror("Pipeline Error", error_msg)
                 )
                 self.root.after(0, lambda: self.update_status("Pipeline setup failed"))
+                self.root.after(
+                    0,
+                    lambda: (
+                        self.quick_actions.update_connection_status(False)
+                        if self.quick_actions
+                        else None
+                    ),
+                )
                 return
 
-            print("Pipeline setup successful")
-
-            # Setup display tabs for connected cameras
+            # Setup display tabs
             def setup_displays():
                 connected_cameras = self.camera_controller.get_connected_cameras()
                 print(f"Setting up display tabs for: {connected_cameras}")
-                for camera_name in connected_cameras:
-                    self.display_manager.setup_camera_tab(camera_name)
+                display_manager = self.ui_manager.get_display_manager()
+                if display_manager:
+                    for camera_name in connected_cameras:
+                        display_manager.setup_camera_tab(camera_name)
 
             self.root.after(0, setup_displays)
 
             # Start streaming
-            print("Starting camera streaming...")
             if not self.camera_controller.start_streaming():
-                error_msg = (
-                    "Failed to start camera streaming. Check console for details."
-                )
+                error_msg = "Failed to start camera streaming."
                 print("Streaming failed to start")
                 self.root.after(
                     0, lambda: messagebox.showerror("Streaming Error", error_msg)
@@ -276,20 +265,22 @@ class OAKCameraViewer:
                 self.root.after(0, lambda: self.update_status("Streaming failed"))
                 return
 
-            print("Streaming started successfully")
-
             # Start display updates
-            self.display_manager.start_display_loop(
-                self.camera_controller, self.file_manager
-            )
+            display_manager = self.ui_manager.get_display_manager()
+            if display_manager:
+                display_manager.start_display_loop(
+                    self.camera_controller, self.file_manager
+                )
 
             # Update UI state
             self.connected = True
             device_info = self.camera_controller.get_device_info()
-            print(f"Device info: {device_info}")
 
             def update_ui():
-                self.control_panel.update_connection_status(True, device_info)
+                if self.quick_actions:
+                    self.quick_actions.update_connection_status(True)
+                if self.control_panel:
+                    self.control_panel.update_device_info(device_info)
                 self.update_status("Connected successfully")
                 messagebox.showinfo("Success", message)
 
@@ -305,6 +296,14 @@ class OAKCameraViewer:
                 0, lambda: messagebox.showerror("Connection Error", error_msg)
             )
             self.root.after(0, lambda: self.update_status("Connection error"))
+            self.root.after(
+                0,
+                lambda: (
+                    self.quick_actions.update_connection_status(False)
+                    if self.quick_actions
+                    else None
+                ),
+            )
 
     def disconnect_camera(self):
         """Disconnect from camera"""
@@ -317,25 +316,27 @@ class OAKCameraViewer:
         # Stop recording if active
         if self.file_manager.is_recording():
             success, message, _ = self.file_manager.stop_video_recording()
-            if self.control_panel:
-                self.control_panel.update_record_button(False)
+            if self.quick_actions:
+                self.quick_actions.update_recording_status(False)
 
         # Stop display updates
-        if self.display_manager:
-            self.display_manager.stop_display_loop()
+        display_manager = self.ui_manager.get_display_manager()
+        if display_manager:
+            display_manager.stop_display_loop()
 
         # Disconnect camera
         self.camera_controller.disconnect()
 
         # Clear displays
-        if self.display_manager:
-            self.display_manager.clear_displays()
+        if display_manager:
+            display_manager.clear_displays()
 
         # Update UI state
         self.connected = False
+        if self.quick_actions:
+            self.quick_actions.update_connection_status(False)
         if self.control_panel:
-            self.control_panel.update_connection_status(False)
-
+            self.control_panel.update_device_info(None)
         self.update_status("Disconnected")
 
     def capture_images(self):
@@ -380,8 +381,8 @@ class OAKCameraViewer:
         if self.file_manager.is_recording():
             # Stop recording
             success, message, filepaths = self.file_manager.stop_video_recording()
-            if self.control_panel:
-                self.control_panel.update_record_button(False)
+            if self.quick_actions:
+                self.quick_actions.update_recording_status(False)
 
             if success:
                 messagebox.showinfo(
@@ -398,33 +399,21 @@ class OAKCameraViewer:
                 messagebox.showwarning("Warning", "No cameras available")
                 return
 
-            # Parse current resolution and fps settings
-            try:
-                resolution_str = self.control_panel.widgets["resolution_var"].get()
-                fps_str = self.control_panel.widgets["fps_var"].get()
-
-                if "x" in resolution_str:
-                    width_str, height_str = resolution_str.split("x")
-                    width = int(width_str.strip())
-                    height = int(height_str.strip())
-                else:
-                    width, height = 1280, 720
-
-                fps = int(fps_str)
-            except (ValueError, KeyError):
-                # Fallback to default settings
-                width, height, fps = 1280, 720, 30
-                print(
-                    f"Warning: Using default recording settings: {width}x{height}@{fps}fps"
-                )
+            # Get current resolution and fps settings
+            current_settings = {"width": 1280, "height": 720, "fps": 30}
+            if self.control_panel:
+                current_settings = self.control_panel.get_current_settings()
 
             success, message = self.file_manager.start_video_recording(
-                camera_names, width, height, fps
+                camera_names,
+                current_settings["width"],
+                current_settings["height"],
+                current_settings["fps"],
             )
 
             if success:
-                if self.control_panel:
-                    self.control_panel.update_record_button(True)
+                if self.quick_actions:
+                    self.quick_actions.update_recording_status(True, 0.0)
                 self.update_status("Recording started")
             else:
                 messagebox.showerror("Error", f"Failed to start recording: {message}")
@@ -432,19 +421,16 @@ class OAKCameraViewer:
 
     def set_save_directory(self):
         """Set the save directory for captures"""
-        from tkinter import filedialog
-
         directory = filedialog.askdirectory(
             title="Select Save Directory", initialdir=self.file_manager.save_directory
         )
 
         if directory:
             success = self.file_manager.set_save_directory(Path(directory))
-            if success and self.control_panel:
-                self.control_panel.update_save_directory_display(
-                    self.file_manager.save_directory
-                )
-                self.update_status(f"Save directory updated: {directory}")
+            if success:
+                if self.quick_actions:
+                    self.quick_actions.update_save_directory_display(Path(directory))
+                self.update_status("Save directory updated")
             else:
                 messagebox.showerror("Error", "Failed to set save directory")
 
@@ -456,29 +442,9 @@ class OAKCameraViewer:
                 "Changing stream settings requires reconnecting the camera. Continue?",
             )
             if result:
-                # Update settings
-                self.settings_manager.update_setting(
-                    "resolution_width", settings["width"]
-                )
-                self.settings_manager.update_setting(
-                    "resolution_height", settings["height"]
-                )
-                self.settings_manager.update_setting("fps", settings["fps"])
-
-                # Update the control panel's resolution dropdown
-                resolution_str = f"{settings['width']}x{settings['height']}"
-                if "resolution_var" in self.control_panel.widgets:
-                    # Add to options if not present
-                    if resolution_str not in self.control_panel.resolution_options:
-                        self.control_panel.resolution_options.append(resolution_str)
-                    self.control_panel.widgets["resolution_var"].set(resolution_str)
-
-                if "fps_var" in self.control_panel.widgets:
-                    self.control_panel.widgets["fps_var"].set(str(settings["fps"]))
-
-                # Reconnect
+                # Reconnect with new settings
                 self.disconnect_camera()
-                time.sleep(1)  # Brief pause
+                time.sleep(1)
                 self.connect_camera()
 
     def reset_camera_settings(self):
@@ -488,58 +454,44 @@ class OAKCameraViewer:
         ):
             self.settings_manager.reset_to_defaults()
             if self.control_panel:
-                self.control_panel._update_all_widgets()
+                self.control_panel.update_all_widgets()
             self.update_status("Settings reset to defaults")
 
     def refresh_displays(self):
         """Refresh camera displays"""
-        if self.connected and self.display_manager:
-            # Clear and recreate displays
-            self.display_manager.clear_displays()
-            for camera_name in self.camera_controller.get_connected_cameras():
-                self.display_manager.setup_camera_tab(camera_name)
+        if self.connected:
+            display_manager = self.ui_manager.get_display_manager()
+            if display_manager:
+                display_manager.clear_displays()
+                for camera_name in self.camera_controller.get_connected_cameras():
+                    display_manager.setup_camera_tab(camera_name)
             self.update_status("Displays refreshed")
 
     def open_save_directory(self):
         """Open the save directory in file explorer"""
-        import subprocess
-        import platform
-
         try:
             if platform.system() == "Windows":
                 subprocess.run(["explorer", str(self.file_manager.save_directory)])
-            elif platform.system() == "Darwin":  # macOS
+            elif platform.system() == "Darwin":
                 subprocess.run(["open", str(self.file_manager.save_directory)])
-            else:  # Linux
+            else:
                 subprocess.run(["xdg-open", str(self.file_manager.save_directory)])
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open directory: {e}")
 
-    def update_status(self, message: str):
-        """Update status bar message"""
-        if hasattr(self, "status_text"):
-            timestamp = time.strftime("%H:%M:%S")
-            self.status_text.config(text=f"[{timestamp}] {message}")
+    def show_shortcuts(self):
+        """Show keyboard shortcuts - handled by MenuBarManager"""
+        pass  # MenuBarManager handles this with its default implementation
 
     def show_about(self):
-        """Show about dialog"""
-        about_text = """OAK PoE Camera Viewer
-        
-Version: 1.0.0
-Built with DepthAI V3
+        """Show about dialog - handled by MenuBarManager"""
+        pass  # MenuBarManager handles this with its default implementation
 
-A comprehensive camera viewer for Luxonis OAK PoE devices.
-
-Features:
-• Multi-camera display (CAM_A, CAM_B, CAM_C)
-• Complete camera controls
-• Image capture
-• Video recording
-• Real-time settings adjustment
-
-© 2024 - Built with Python and DepthAI"""
-
-        messagebox.showinfo("About", about_text)
+    def update_status(self, message: str):
+        """Update status bar message"""
+        status_bar = self.ui_manager.get_status_bar()
+        if status_bar:
+            status_bar.update_status(message)
 
     def on_closing(self):
         """Handle application closing"""
@@ -548,9 +500,9 @@ Features:
                 "Recording Active",
                 "Video recording is active. Stop recording before closing?",
             )
-            if result is None:  # Cancel
+            if result is None:
                 return
-            elif result:  # Yes - stop recording
+            elif result:
                 self.file_manager.stop_video_recording()
 
         # Stop all operations
@@ -563,12 +515,6 @@ Features:
 
         self.root.quit()
         self.root.destroy()
-
-    def handle_error(self, error_message: str, title: str = "Error"):
-        """Handle application errors"""
-        print(f"Error: {error_message}")
-        messagebox.showerror(title, error_message)
-        self.update_status(f"Error: {error_message}")
 
 
 def check_dependencies():
@@ -601,31 +547,14 @@ def check_dependencies():
 
 def main():
     """Main application entry point"""
-
-    # Check dependencies
     if not check_dependencies():
         sys.exit(1)
 
     # Create and configure root window
     root = tk.Tk()
 
-    # Set window icon (if available)
-    try:
-        # You can add an icon file here
-        # root.iconbitmap("icon.ico")
-        pass
-    except:
-        pass
-
-    # Create application
     try:
         app = OAKCameraViewer(root)
-
-        # Center window on screen
-        root.update_idletasks()
-        x = (root.winfo_screenwidth() // 2) - (root.winfo_width() // 2)
-        y = (root.winfo_screenheight() // 2) - (root.winfo_height() // 2)
-        root.geometry(f"+{x}+{y}")
 
         # Start main loop
         root.mainloop()
