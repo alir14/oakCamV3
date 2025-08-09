@@ -21,3 +21,7 @@ colorama>=0.4.4
 # flake8>=4.0.0
 # pytest>=7.0.0
 # mypy>=0.910
+
+# GPS
+pyserial>=3.5
+pynmea2>=1.19.0

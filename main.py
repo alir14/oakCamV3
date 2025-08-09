@@ -14,6 +14,7 @@ from camera.settings import CameraSettingsManager
 from utils.file_manager import FileManager
 from ui.display import UIManager, MenuBarManager, StatusBarManager, DisplayManager
 from ui.controls import QuickActionsMenu, ControlPanel
+from GPS.gps_integration import GPSIntegration
 
 
 class OAKCameraViewer:
@@ -26,6 +27,7 @@ class OAKCameraViewer:
         self.camera_controller = CameraController()
         self.settings_manager = CameraSettingsManager(self.camera_controller)
         self.file_manager = FileManager()
+        self.gps = GPSIntegration()
 
         # Initialize UI components
         self.ui_manager = UIManager(root)
@@ -84,6 +86,7 @@ class OAKCameraViewer:
                 disconnect=self.disconnect_camera,
                 capture=self.capture_images,
                 record_toggle=self.toggle_recording,
+                capture_gps=self.capture_gps_data,
                 save_dir_change=self.set_save_directory,
                 reset_settings=self.reset_camera_settings,
             )
@@ -214,6 +217,18 @@ class OAKCameraViewer:
 
             print(f"Connection successful: {message}")
 
+            # Attempt GPS connection in background (non-blocking)
+            def start_gps():
+                try:
+                    if self.gps.connect_gps():
+                        self.gps.start_gps_monitoring()
+                        self.update_status("GPS connected")
+                    else:
+                        self.update_status("GPS not found")
+                except Exception as e:
+                    print(f"GPS init error: {e}")
+            threading.Thread(target=start_gps, daemon=True).start()
+
             # Get current settings for pipeline setup
             current_settings = {"width": 1280, "height": 720, "fps": 30}
             if self.control_panel:
@@ -334,6 +349,11 @@ class OAKCameraViewer:
 
         # Disconnect camera
         self.camera_controller.disconnect()
+        # Disconnect GPS
+        try:
+            self.gps.disconnect_gps()
+        except Exception:
+            pass
 
         # Clear displays
         if display_manager:
@@ -371,6 +391,15 @@ class OAKCameraViewer:
 
         if success_count > 0:
             self.update_status(f"Captured {success_count} images")
+            # Save GPS data JSON alongside captures if available
+            try:
+                gps_data = self.gps.get_current_gps_data()
+                if gps_data:
+                    for path in filepaths:
+                        self.gps.save_gps_data_with_image(path, gps_data)
+                    self.update_status(f"Captured {success_count} images + GPS")
+            except Exception as e:
+                print(f"GPS save error: {e}")
         else:
             self.update_status("Capture failed")
 
@@ -414,8 +443,31 @@ class OAKCameraViewer:
                 if self.quick_actions:
                     self.quick_actions.update_recording_status(True, 0.0)
                 self.update_status("Recording started")
+                # Note: For live GPS logging during recording, we could append per frame
+                # but for now we keep on-demand capture via button
             else:
                 self.update_status(f"Failed to start recording: {message}")
+
+    def capture_gps_data(self):
+        """Capture current GPS data to a standalone JSON file"""
+        try:
+            data = self.gps.get_current_gps_data()
+            if not data:
+                self.update_status("No GPS fix yet")
+                return
+            # Save a timestamped JSON even without image association
+            from datetime import datetime
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Reuse save directory
+            json_path = self.file_manager.save_directory / f"gps_only_{ts}.json"
+            import json
+            payload = {"gps_data": data, "captured_at": datetime.now().isoformat()}
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+            self.update_status("GPS captured")
+        except Exception as e:
+            print(f"GPS capture error: {e}")
+            self.update_status("GPS capture failed")
 
     def set_save_directory(self):
         """Set the save directory for captures"""

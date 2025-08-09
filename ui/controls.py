@@ -19,6 +19,7 @@ class QuickActionsMenu:
         self.on_disconnect: Optional[Callable] = None
         self.on_capture: Optional[Callable] = None
         self.on_record_toggle: Optional[Callable] = None
+        self.on_capture_gps: Optional[Callable] = None
         self.on_save_dir_change: Optional[Callable] = None
         self.on_reset_settings: Optional[Callable] = None
 
@@ -73,6 +74,15 @@ class QuickActionsMenu:
             width=15,
         )
         self.widgets["record_btn"].pack(side=tk.LEFT, padx=2)
+
+        # GPS capture button
+        self.widgets["gps_btn"] = ttk.Button(
+            capture_frame,
+            text="📍 Capture GPS",
+            command=self._on_capture_gps_clicked,
+            width=15,
+        )
+        self.widgets["gps_btn"].pack(side=tk.LEFT, padx=2)
 
         # Settings buttons
         settings_frame = ttk.LabelFrame(button_row, text="Settings", padding=5)
@@ -147,6 +157,10 @@ class QuickActionsMenu:
     def _on_record_clicked(self):
         if self.on_record_toggle:
             self.on_record_toggle()
+
+    def _on_capture_gps_clicked(self):
+        if self.on_capture_gps:
+            self.on_capture_gps()
 
     def _on_save_dir_clicked(self):
         if self.on_save_dir_change:
