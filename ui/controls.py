@@ -20,6 +20,7 @@ class QuickActionsMenu:
         self.on_capture: Optional[Callable] = None
         self.on_record_toggle: Optional[Callable] = None
         self.on_capture_gps: Optional[Callable] = None
+        self.on_toggle_gps_interval: Optional[Callable] = None
         self.on_save_dir_change: Optional[Callable] = None
         self.on_reset_settings: Optional[Callable] = None
 
@@ -83,6 +84,15 @@ class QuickActionsMenu:
             width=15,
         )
         self.widgets["gps_btn"].pack(side=tk.LEFT, padx=2)
+
+        # GPS interval capture toggle button
+        self.widgets["gps_interval_btn"] = ttk.Button(
+            capture_frame,
+            text="▶ Start GPS Capture",
+            command=self._on_toggle_gps_interval_clicked,
+            width=18,
+        )
+        self.widgets["gps_interval_btn"].pack(side=tk.LEFT, padx=2)
 
         # Settings buttons
         settings_frame = ttk.LabelFrame(button_row, text="Settings", padding=5)
@@ -161,6 +171,17 @@ class QuickActionsMenu:
     def _on_capture_gps_clicked(self):
         if self.on_capture_gps:
             self.on_capture_gps()
+
+    def _on_toggle_gps_interval_clicked(self):
+        if self.on_toggle_gps_interval:
+            self.on_toggle_gps_interval()
+
+    def update_gps_interval_status(self, running: bool):
+        """Update GPS interval capture toggle button text"""
+        if running:
+            self.widgets["gps_interval_btn"].config(text="⏹ Stop GPS Capture")
+        else:
+            self.widgets["gps_interval_btn"].config(text="▶ Start GPS Capture")
 
     def _on_save_dir_clicked(self):
         if self.on_save_dir_change:
@@ -676,6 +697,24 @@ class ControlPanel:
         )
         effect_combo.pack(side=tk.LEFT, padx=10)
 
+        # GPS interval control (meters)
+        gps_interval_frame = ttk.Frame(other_section)
+        gps_interval_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(gps_interval_frame, text="GPS Interval (m):").pack(side=tk.LEFT)
+        self.widgets["gps_interval_var"] = tk.DoubleVar(
+            value=float(self.settings_manager.get_setting("gps_interval_m"))
+        )
+        gps_spin = ttk.Spinbox(
+            gps_interval_frame,
+            from_=0.1,
+            to=100.0,
+            increment=0.1,
+            textvariable=self.widgets["gps_interval_var"],
+            width=8,
+            command=lambda: self._on_gps_interval_changed(),
+        )
+        gps_spin.pack(side=tk.LEFT, padx=10)
+
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
@@ -797,6 +836,15 @@ class ControlPanel:
 
     def _on_white_balance_changed(self, value: int):
         self.settings_manager.set_white_balance(value)
+
+    def _on_gps_interval_changed(self):
+        try:
+            val = float(self.widgets["gps_interval_var"].get())
+            if val <= 0:
+                val = 1.0
+            self.settings_manager.update_setting("gps_interval_m", val)
+        except Exception:
+            pass
 
     # Public interface methods
     def set_callbacks(self, **callbacks):

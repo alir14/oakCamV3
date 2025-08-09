@@ -3,7 +3,9 @@ import tkinter as tk
 from tkinter import messagebox, filedialog
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
+import cv2
 from typing import Dict, Optional
 import subprocess
 import platform
@@ -38,6 +40,10 @@ class OAKCameraViewer:
         self.connected = False
         self.status_thread: Optional[threading.Thread] = None
         self.status_running = False
+        # GPS movement-based capture state
+        self.gps_capture_running = False
+        self.gps_capture_thread: Optional[threading.Thread] = None
+        self.last_gps_position: Optional[Dict] = None
 
         # Setup application
         self.setup_application()
@@ -87,6 +93,7 @@ class OAKCameraViewer:
                 capture=self.capture_images,
                 record_toggle=self.toggle_recording,
                 capture_gps=self.capture_gps_data,
+                toggle_gps_interval=self.toggle_gps_interval_capture,
                 save_dir_change=self.set_save_directory,
                 reset_settings=self.reset_camera_settings,
             )
@@ -354,6 +361,8 @@ class OAKCameraViewer:
             self.gps.disconnect_gps()
         except Exception:
             pass
+        # Stop GPS interval capture
+        self.stop_gps_interval_capture()
 
         # Clear displays
         if display_manager:
@@ -391,17 +400,105 @@ class OAKCameraViewer:
 
         if success_count > 0:
             self.update_status(f"Captured {success_count} images")
-            # Save GPS data JSON alongside captures if available
-            try:
-                gps_data = self.gps.get_current_gps_data()
-                if gps_data:
-                    for path in filepaths:
-                        self.gps.save_gps_data_with_image(path, gps_data)
-                    self.update_status(f"Captured {success_count} images + GPS")
-            except Exception as e:
-                print(f"GPS save error: {e}")
+            # Save GPS data JSON alongside captures if available (same folder, same base)
+            gps_data = self.gps.get_current_gps_data()
+            if gps_data:
+                for path in filepaths:
+                    # Overwrite gps_integration default directory: save next to image
+                    try:
+                        import json, os
+                        base, _ = os.path.splitext(path)
+                        json_path = base + ".json"
+                        with open(json_path, "w", encoding="utf-8") as f:
+                            json.dump({
+                                "image_filename": path,
+                                "gps_data": gps_data,
+                                "captured_at": datetime.now().isoformat(),
+                            }, f, indent=2, ensure_ascii=False)
+                    except Exception as e:
+                        print(f"GPS save error: {e}")
+                self.update_status(f"Captured {success_count} images + GPS")
         else:
             self.update_status("Capture failed")
+
+    def _gps_distance_m(self, a: Dict, b: Dict) -> float:
+        import math
+        lat1, lon1 = a.get("latitude", 0.0), a.get("longitude", 0.0)
+        lat2, lon2 = b.get("latitude", 0.0), b.get("longitude", 0.0)
+        r = 6371000.0
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dl = math.radians(lon2 - lon1)
+        x = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dl / 2.0) ** 2
+        return 2.0 * r * math.asin(min(1.0, math.sqrt(x)))
+
+    def start_gps_interval_capture(self):
+        """Start background GPS-interval-based capture"""
+        if self.gps_capture_running:
+            self.update_status("GPS interval capture already running")
+            return
+        if not self.connected:
+            self.update_status("Connect camera first")
+            return
+        self.gps_capture_running = True
+        self.last_gps_position = None
+
+        def _loop():
+            self.update_status("GPS interval capture started")
+            while self.gps_capture_running:
+                try:
+                    gps_data = self.gps.get_current_gps_data()
+                    if gps_data:
+                        if self.last_gps_position is None:
+                            self.last_gps_position = gps_data
+                            # Capture immediately on first valid fix
+                            self._capture_images_with_gps(gps_data)
+                        else:
+                            dist = self._gps_distance_m(self.last_gps_position, gps_data)
+                            threshold_m = float(self.settings_manager.get_setting("gps_interval_m") or 1.0)
+                            if dist >= threshold_m:
+                                self._capture_images_with_gps(gps_data)
+                                self.last_gps_position = gps_data
+                    # Sleep a short interval to avoid busy loop
+                    time.sleep(0.2)
+                except Exception as e:
+                    print(f"GPS interval loop error: {e}")
+                    time.sleep(0.5)
+            self.update_status("GPS interval capture stopped")
+
+        self.gps_capture_thread = threading.Thread(target=_loop, daemon=True)
+        self.gps_capture_thread.start()
+
+    def stop_gps_interval_capture(self):
+        self.gps_capture_running = False
+        if self.gps_capture_thread and self.gps_capture_thread.is_alive():
+            self.gps_capture_thread.join(timeout=1.0)
+
+    def _capture_images_with_gps(self, gps_data: Dict):
+        """Capture images and save paired GPS JSON in date folder with same base name"""
+        try:
+            images = {}
+            for camera_name in self.camera_controller.get_connected_cameras():
+                frame = self.camera_controller.get_frame(camera_name)
+                if frame is not None:
+                    images[camera_name] = frame
+            if not images:
+                return
+            # Ensure date dir
+            now = datetime.now()
+            date_dir = self.file_manager.ensure_date_directory(now)
+            ts = now.strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            saved_paths = []
+            for camera_name, img in images.items():
+                img_path = date_dir / f"{camera_name}_{ts}.jpg"
+                cv2.imwrite(str(img_path), img)
+                saved_paths.append(str(img_path))
+            # Save GPS JSONs with same base
+            for img_path in saved_paths:
+                self.gps.save_gps_data_with_image(img_path, gps_data)
+            self.update_status("GPS interval capture saved")
+        except Exception as e:
+            print(f"GPS capture save error: {e}")
 
     def toggle_recording(self):
         """Toggle video recording"""
@@ -511,6 +608,16 @@ class OAKCameraViewer:
                 for camera_name in self.camera_controller.get_connected_cameras():
                     display_manager.setup_camera_tab(camera_name)
             self.update_status("Displays refreshed")
+
+    def toggle_gps_interval_capture(self):
+        if not self.gps_capture_running:
+            self.start_gps_interval_capture()
+            if self.quick_actions:
+                self.quick_actions.update_gps_interval_status(True)
+        else:
+            self.stop_gps_interval_capture()
+            if self.quick_actions:
+                self.quick_actions.update_gps_interval_status(False)
 
     def open_save_directory(self):
         """Open the save directory in file explorer"""

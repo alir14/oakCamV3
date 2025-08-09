@@ -41,6 +41,8 @@ class CameraSettingsManager:
             "resolution_height": 720,
             "luma_denoise": 1,
             "chroma_denoise": 1,
+            # App-level setting: GPS-based capture interval threshold (meters)
+            "gps_interval_m": 1.0,
         }
 
         # Auto mode flags

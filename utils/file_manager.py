@@ -79,13 +79,21 @@ class FileManager:
         Capture multiple images with synchronized timestamp
         Returns: (success_count: int, filepaths: List[str])
         """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        now = datetime.now()
+        timestamp = now.strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        # Date-based directory
+        date_dir = self.save_directory / now.strftime("%Y-%m-%d")
+        try:
+            date_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"Date dir error: {e}")
+            date_dir = self.save_directory
         filepaths = []
         success_count = 0
 
         for camera_name, image in images.items():
             try:
-                filename = self.save_directory / f"{camera_name}_{timestamp}.{format}"
+                filename = date_dir / f"{camera_name}_{timestamp}.{format}"
                 if cv2.imwrite(str(filename), image):
                     filepaths.append(str(filename))
                     success_count += 1
@@ -93,6 +101,12 @@ class FileManager:
                 print(f"Batch capture error for {camera_name}: {e}")
 
         return success_count, filepaths
+
+    def ensure_date_directory(self, dt: Optional[datetime] = None) -> Path:
+        dt = dt or datetime.now()
+        date_dir = self.save_directory / dt.strftime("%Y-%m-%d")
+        date_dir.mkdir(parents=True, exist_ok=True)
+        return date_dir
 
     def start_video_recording(
         self,
