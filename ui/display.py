@@ -205,9 +205,10 @@ class DisplayManager:
         # Display settings
         self.display_width = 640
         self.target_fps = 30
-        self.frame_count = 0
-        self.last_fps_update = time.time()
-        self.current_fps = 0.0
+        # Per-camera FPS tracking
+        self._camera_frame_counts: Dict[str, int] = {}
+        self._camera_last_update: Dict[str, float] = {}
+        self._camera_current_fps: Dict[str, float] = {}
 
     def setup_camera_tab(self, camera_name: str):
         """Setup display tab for a camera"""
@@ -293,24 +294,30 @@ class DisplayManager:
             print(f"Display update error for {camera_name}: {e}")
 
     def _update_fps_display(self, camera_name: str):
-        """Update FPS display for camera"""
+        """Update FPS display for camera (per-camera measurement)"""
         try:
             current_time = time.time()
-            self.frame_count += 1
+            # Initialize counters for this camera if needed
+            if camera_name not in self._camera_frame_counts:
+                self._camera_frame_counts[camera_name] = 0
+                self._camera_last_update[camera_name] = current_time
+                self._camera_current_fps[camera_name] = 0.0
 
-            # Update FPS every second
-            if current_time - self.last_fps_update >= 1.0:
-                self.current_fps = self.frame_count / (
-                    current_time - self.last_fps_update
-                )
-                self.frame_count = 0
-                self.last_fps_update = current_time
+            self._camera_frame_counts[camera_name] += 1
 
-                # Update FPS label
+            # Update per-camera FPS every second
+            elapsed = current_time - self._camera_last_update[camera_name]
+            if elapsed >= 1.0:
+                fps = self._camera_frame_counts[camera_name] / max(elapsed, 1e-6)
+                self._camera_current_fps[camera_name] = fps
+                self._camera_frame_counts[camera_name] = 0
+                self._camera_last_update[camera_name] = current_time
+
+                # Update FPS label for this camera
                 fps_label_key = f"{camera_name}_fps"
                 if fps_label_key in self.camera_frames:
                     self.camera_frames[fps_label_key].config(
-                        text=f"FPS: {self.current_fps:.1f}"
+                        text=f"FPS: {fps:.1f}"
                     )
         except Exception as e:
             print(f"FPS update error: {e}")
@@ -387,8 +394,15 @@ class DisplayManager:
         )  # Clamp between reasonable values
 
     def get_current_fps(self) -> float:
-        """Get current display FPS"""
-        return self.current_fps
+        """Get average display FPS across cameras"""
+        if not self._camera_current_fps:
+            return 0.0
+        try:
+            return sum(self._camera_current_fps.values()) / len(
+                self._camera_current_fps
+            )
+        except Exception:
+            return 0.0
 
     def take_screenshot(self, camera_name: str) -> Optional[np.ndarray]:
         """Take a screenshot of currently displayed frame"""

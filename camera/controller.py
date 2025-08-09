@@ -20,6 +20,8 @@ class CameraController:
         self.control_queues: Dict[str, dai.DataInputQueue] = {}
         self.output_queues: Dict[str, dai.DataOutputQueue] = {}
         self.running = False
+        # Cache of last retrieved frames per camera to avoid race conditions
+        self.last_frames: Dict[str, np.ndarray] = {}
         # Target output resolution per camera name (software-resized)
         # Defaults: CAM_A 1024x768, CAM_B/C 1280x800
         self.desired_resolutions: Dict[str, Tuple[int, int]] = {
@@ -148,9 +150,15 @@ class CameraController:
                         tgt_w, tgt_h = target
                         if img.shape[1] != tgt_w or img.shape[0] != tgt_h:
                             img = cv2.resize(img, (tgt_w, tgt_h), interpolation=cv2.INTER_AREA)
+                    # Update last frame cache
+                    if img is not None:
+                        self.last_frames[camera_name] = img
                     return img
                 except Exception as e:
                     print(f"Frame retrieval error for {camera_name}: {e}")
+            # If no new frame available, return last cached frame if any
+            if camera_name in self.last_frames:
+                return self.last_frames[camera_name]
         return None
 
     def set_desired_resolutions(self, per_camera: Dict[str, Tuple[int, int]]):

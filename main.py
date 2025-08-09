@@ -274,6 +274,8 @@ class OAKCameraViewer:
             # Start display updates
             display_manager = self.ui_manager.get_display_manager()
             if display_manager:
+                # Ensure display loop targets the selected FPS
+                display_manager.target_fps = current_settings.get("fps", 30)
                 display_manager.start_display_loop(
                     self.camera_controller, self.file_manager
                 )
@@ -348,7 +350,7 @@ class OAKCameraViewer:
     def capture_images(self):
         """Capture images from all cameras"""
         if not self.connected:
-            messagebox.showwarning("Warning", "No cameras connected")
+            self.update_status("No cameras connected")
             return
 
         self.update_status("Capturing images...")
@@ -361,7 +363,6 @@ class OAKCameraViewer:
                 images[camera_name] = frame
 
         if not images:
-            messagebox.showwarning("Warning", "No frames available for capture")
             self.update_status("Capture failed - no frames")
             return
 
@@ -369,19 +370,14 @@ class OAKCameraViewer:
         success_count, filepaths = self.file_manager.capture_images_batch(images)
 
         if success_count > 0:
-            messagebox.showinfo(
-                "Success",
-                f"Captured {success_count} images\nSaved to: {self.file_manager.save_directory}",
-            )
             self.update_status(f"Captured {success_count} images")
         else:
-            messagebox.showerror("Error", "Failed to capture any images")
             self.update_status("Capture failed")
 
     def toggle_recording(self):
         """Toggle video recording"""
         if not self.connected:
-            messagebox.showwarning("Warning", "No cameras connected")
+            self.update_status("No cameras connected")
             return
 
         if self.file_manager.is_recording():
@@ -391,18 +387,14 @@ class OAKCameraViewer:
                 self.quick_actions.update_recording_status(False)
 
             if success:
-                messagebox.showinfo(
-                    "Success",
-                    f"Recording stopped\n{message}\nSaved to: {self.file_manager.save_directory}",
-                )
                 self.update_status("Recording stopped")
             else:
-                messagebox.showerror("Error", f"Error stopping recording: {message}")
+                self.update_status(f"Error stopping recording: {message}")
         else:
             # Start recording
             camera_names = self.camera_controller.get_connected_cameras()
             if not camera_names:
-                messagebox.showwarning("Warning", "No cameras available")
+                self.update_status("No cameras available")
                 return
 
             # Get current resolution and fps settings
@@ -423,8 +415,7 @@ class OAKCameraViewer:
                     self.quick_actions.update_recording_status(True, 0.0)
                 self.update_status("Recording started")
             else:
-                messagebox.showerror("Error", f"Failed to start recording: {message}")
-                self.update_status("Recording failed to start")
+                self.update_status(f"Failed to start recording: {message}")
 
     def set_save_directory(self):
         """Set the save directory for captures"""
@@ -444,15 +435,10 @@ class OAKCameraViewer:
     def apply_stream_settings(self, settings: Dict):
         """Apply new stream settings (requires reconnection)"""
         if self.connected:
-            result = messagebox.askyesno(
-                "Settings Change",
-                "Changing stream settings requires reconnecting the camera. Continue?",
-            )
-            if result:
-                # Reconnect with new settings
-                self.disconnect_camera()
-                time.sleep(1)
-                self.connect_camera()
+            # No popup; reconnect automatically
+            self.disconnect_camera()
+            time.sleep(1)
+            self.connect_camera()
 
     def reset_camera_settings(self):
         """Reset all camera settings to defaults"""
