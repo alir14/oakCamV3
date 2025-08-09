@@ -235,50 +235,39 @@ class ControlPanel:
         res_frame = ttk.LabelFrame(self.parent, text="Stream Settings", padding=5)
         res_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Resolution section
-        res_section = ttk.Frame(res_frame)
-        res_section.pack(fill=tk.X, pady=2)
+        # CAM_A Resolution section
+        cam_a_section = ttk.Frame(res_frame)
+        cam_a_section.pack(fill=tk.X, pady=2)
 
-        ttk.Label(res_section, text="Resolution:", width=12).pack(side=tk.LEFT)
+        ttk.Label(cam_a_section, text="CAM_A Resolution:", width=18).pack(side=tk.LEFT)
 
-        # Common resolutions for OAK cameras
-        self.resolution_options = [
-            "320x240",
-            "640x480",
-            "800x600",
-            "1280x720",
-            "1280x800",
-            "1920x1080",
-            "1920x1200",
-            "2560x1440",
-            "3840x2160",
+        # Allowed CAM_A resolutions
+        self.cam_a_resolution_options = [
+            "1024x768",
+            "2048x1536",
+            "4000x3000",
         ]
 
-        current_width = self.settings_manager.get_setting("resolution_width")
-        current_height = self.settings_manager.get_setting("resolution_height")
-        current_resolution = f"{current_width}x{current_height}"
+        # Default CAM_A resolution
+        cam_a_default = "1024x768"
+        if cam_a_default not in self.cam_a_resolution_options:
+            self.cam_a_resolution_options.append(cam_a_default)
 
-        if current_resolution not in self.resolution_options:
-            self.resolution_options.append(current_resolution)
-
-        self.widgets["resolution_var"] = tk.StringVar(value=current_resolution)
-        resolution_dropdown = ttk.Combobox(
-            res_section,
-            textvariable=self.widgets["resolution_var"],
-            values=self.resolution_options,
+        self.widgets["cam_a_resolution_var"] = tk.StringVar(value=cam_a_default)
+        cam_a_dropdown = ttk.Combobox(
+            cam_a_section,
+            textvariable=self.widgets["cam_a_resolution_var"],
+            values=self.cam_a_resolution_options,
             state="readonly",
-            width=12,
+            width=14,
         )
-        resolution_dropdown.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        cam_a_dropdown.pack(side=tk.LEFT, padx=5)
 
-        # Custom resolution button
-        custom_res_btn = ttk.Button(
-            res_section,
-            text="Custom",
-            command=self._show_custom_resolution_dialog,
-            width=8,
-        )
-        custom_res_btn.pack(side=tk.RIGHT)
+        # CAM_B/C Resolution display (fixed)
+        cam_bc_section = ttk.Frame(res_frame)
+        cam_bc_section.pack(fill=tk.X, pady=2)
+        ttk.Label(cam_bc_section, text="CAM_B/C Resolution:", width=18).pack(side=tk.LEFT)
+        ttk.Label(cam_bc_section, text="1280x800 (fixed)").pack(side=tk.LEFT, padx=5)
 
         # FPS section
         fps_section = ttk.Frame(res_frame)
@@ -709,21 +698,20 @@ class ControlPanel:
     def _on_apply_stream_settings(self):
         """Apply stream settings"""
         if self.on_settings_change:
-            # Parse resolution from dropdown
-            resolution_str = self.widgets["resolution_var"].get()
-            if "x" in resolution_str:
-                width_str, height_str = resolution_str.split("x")
-                try:
-                    width = int(width_str.strip())
-                    height = int(height_str.strip())
-                except ValueError:
-                    tk.messagebox.showerror(
-                        "Invalid Resolution", "Please select a valid resolution"
-                    )
-                    return
-            else:
+            # Parse CAM_A resolution
+            cam_a_res = self.widgets["cam_a_resolution_var"].get()
+            if "x" not in cam_a_res:
                 tk.messagebox.showerror(
-                    "Invalid Resolution", "Please select a valid resolution"
+                    "Invalid Resolution", "Please select a valid CAM_A resolution"
+                )
+                return
+            cam_a_w_str, cam_a_h_str = cam_a_res.split("x")
+            try:
+                cam_a_w = int(cam_a_w_str.strip())
+                cam_a_h = int(cam_a_h_str.strip())
+            except ValueError:
+                tk.messagebox.showerror(
+                    "Invalid Resolution", "Please select a valid CAM_A resolution"
                 )
                 return
 
@@ -736,7 +724,18 @@ class ControlPanel:
                 )
                 return
 
-            settings = {"width": width, "height": height, "fps": fps}
+            settings = {
+                "fps": fps,
+                # For backward compatibility
+                "width": cam_a_w,
+                "height": cam_a_h,
+                # Per-camera resolutions
+                "per_camera_resolutions": {
+                    "CAM_A": (cam_a_w, cam_a_h),
+                    "CAM_B": (1280, 800),
+                    "CAM_C": (1280, 800),
+                },
+            }
             self.on_settings_change(settings)
 
     # Auto control event handlers
@@ -844,15 +843,14 @@ class ControlPanel:
             if var_key in self.widgets:
                 self.widgets[var_key].set(self.settings_manager.get_setting(control))
 
-        # Update resolution settings
-        width = self.settings_manager.get_setting("resolution_width")
-        height = self.settings_manager.get_setting("resolution_height")
-        resolution_str = f"{width}x{height}"
-
-        if "resolution_var" in self.widgets:
-            if resolution_str not in self.resolution_options:
-                self.resolution_options.append(resolution_str)
-            self.widgets["resolution_var"].set(resolution_str)
+        # Update CAM_A resolution (keep default if not set yet)
+        if "cam_a_resolution_var" in self.widgets:
+            # Try to infer from settings manager, else keep current
+            width = self.settings_manager.get_setting("resolution_width")
+            height = self.settings_manager.get_setting("resolution_height")
+            res_str = f"{width}x{height}"
+            if res_str in getattr(self, "cam_a_resolution_options", []):
+                self.widgets["cam_a_resolution_var"].set(res_str)
 
         # Update FPS
         if "fps_var" in self.widgets:
@@ -861,22 +859,31 @@ class ControlPanel:
     def get_current_settings(self) -> Dict[str, Any]:
         """Get current resolution and FPS settings"""
         settings = {}
-        if "resolution_var" in self.widgets:
-            resolution_str = self.widgets["resolution_var"].get()
-            if "x" in resolution_str:
-                width_str, height_str = resolution_str.split("x")
+        # CAM_A resolution
+        cam_a_res = self.widgets.get("cam_a_resolution_var")
+        if cam_a_res:
+            res_str = cam_a_res.get()
+            if "x" in res_str:
+                w_str, h_str = res_str.split("x")
                 try:
-                    settings["width"] = int(width_str.strip())
-                    settings["height"] = int(height_str.strip())
+                    cam_a_w = int(w_str.strip())
+                    cam_a_h = int(h_str.strip())
                 except ValueError:
-                    settings["width"] = 1280
-                    settings["height"] = 720
+                    cam_a_w, cam_a_h = 1024, 768
             else:
-                settings["width"] = 1280
-                settings["height"] = 720
+                cam_a_w, cam_a_h = 1024, 768
         else:
-            settings["width"] = 1280
-            settings["height"] = 720
+            cam_a_w, cam_a_h = 1024, 768
+
+        # Backward compatible top-level size (use CAM_A)
+        settings["width"], settings["height"] = cam_a_w, cam_a_h
+
+        # Per-camera mapping
+        settings["per_camera_resolutions"] = {
+            "CAM_A": (cam_a_w, cam_a_h),
+            "CAM_B": (1280, 800),
+            "CAM_C": (1280, 800),
+        }
 
         if "fps_var" in self.widgets:
             try:

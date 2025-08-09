@@ -6,7 +6,8 @@ Handles all camera operations and DepthAI pipeline management
 
 import depthai as dai
 import numpy as np
-from typing import Dict, Optional, List
+import cv2
+from typing import Dict, Optional, List, Tuple
 
 
 class CameraController:
@@ -19,6 +20,13 @@ class CameraController:
         self.control_queues: Dict[str, dai.DataInputQueue] = {}
         self.output_queues: Dict[str, dai.DataOutputQueue] = {}
         self.running = False
+        # Target output resolution per camera name (software-resized)
+        # Defaults: CAM_A 1024x768, CAM_B/C 1280x800
+        self.desired_resolutions: Dict[str, Tuple[int, int]] = {
+            "CAM_A": (1024, 768),
+            "CAM_B": (1280, 800),
+            "CAM_C": (1280, 800),
+        }
 
         # Available camera sockets
         self.camera_sockets = {
@@ -133,10 +141,21 @@ class CameraController:
             if queue.has():
                 try:
                     frame = queue.get()
-                    return frame.getCvFrame()
+                    img = frame.getCvFrame()
+                    # Apply software resize to desired resolution if configured
+                    target = self.desired_resolutions.get(camera_name)
+                    if target and img is not None:
+                        tgt_w, tgt_h = target
+                        if img.shape[1] != tgt_w or img.shape[0] != tgt_h:
+                            img = cv2.resize(img, (tgt_w, tgt_h), interpolation=cv2.INTER_AREA)
+                    return img
                 except Exception as e:
                     print(f"Frame retrieval error for {camera_name}: {e}")
         return None
+
+    def set_desired_resolutions(self, per_camera: Dict[str, Tuple[int, int]]):
+        """Set desired output resolution per camera (software resized)."""
+        self.desired_resolutions.update(per_camera)
 
     def send_control_to_camera(self, camera_name: str, ctrl: dai.CameraControl):
         """Send control command to specific camera"""

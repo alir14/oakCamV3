@@ -101,6 +101,7 @@ class FileManager:
         height: int,
         fps: int,
         codec: Optional[str] = None,
+        per_camera_resolutions: Optional[Dict[str, tuple[int, int]]] = None,
     ) -> tuple[bool, str]:
         """
         Start video recording for specified cameras
@@ -118,10 +119,15 @@ class FileManager:
             extension = "avi" if codec_name in ["MJPG", "XVID"] else "mp4"
 
             for camera_name in camera_names:
+                # Resolve per-camera frame size
+                if per_camera_resolutions and camera_name in per_camera_resolutions:
+                    cam_w, cam_h = per_camera_resolutions[camera_name]
+                else:
+                    cam_w, cam_h = width, height
                 filename = (
                     self.save_directory / f"{camera_name}_video_{timestamp}.{extension}"
                 )
-                writer = cv2.VideoWriter(str(filename), fourcc, fps, (width, height))
+                writer = cv2.VideoWriter(str(filename), fourcc, fps, (cam_w, cam_h))
 
                 if not writer.isOpened():
                     # Cleanup any opened writers

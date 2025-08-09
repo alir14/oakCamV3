@@ -223,6 +223,12 @@ class OAKCameraViewer:
                 f"Setting up pipeline: {current_settings['width']}x{current_settings['height']}@{current_settings['fps']}fps"
             )
 
+            # Pass per-camera desired resolutions to controller
+            if "per_camera_resolutions" in current_settings:
+                self.camera_controller.set_desired_resolutions(
+                    current_settings["per_camera_resolutions"]
+                )
+
             if not self.camera_controller.setup_pipeline(
                 current_settings["width"],
                 current_settings["height"],
@@ -409,6 +415,7 @@ class OAKCameraViewer:
                 current_settings["width"],
                 current_settings["height"],
                 current_settings["fps"],
+                per_camera_resolutions=current_settings.get("per_camera_resolutions"),
             )
 
             if success:
