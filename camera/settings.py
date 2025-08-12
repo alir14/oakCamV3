@@ -225,7 +225,11 @@ class CameraSettingsManager:
 
     def get_setting(self, key: str) -> Any:
         """Get setting value"""
-        return self.settings.get(key, 0)
+        value = self.settings.get(key, 0)
+        # Ensure integer values for camera controls
+        if key in ["exposure", "iso", "focus", "brightness", "contrast", "saturation", "sharpness", "white_balance", "luma_denoise", "chroma_denoise"]:
+            return int(value) if value is not None else 0
+        return value
 
     def get_auto_mode(self, key: str) -> bool:
         """Get auto mode status"""
@@ -276,6 +280,8 @@ class CameraSettingsManager:
 
     def apply_all_settings(self):
         """Apply all current settings to cameras"""
+        print("Applying camera settings...")
+        
         # Apply auto modes
         self.set_auto_exposure(self.auto_modes["auto_exposure"])
         self.set_auto_focus(self.auto_modes["auto_focus"])
@@ -292,3 +298,15 @@ class CameraSettingsManager:
         # Apply locks
         self.set_auto_exposure_lock(self.auto_modes["auto_exposure_lock"])
         self.set_auto_white_balance_lock(self.auto_modes["auto_white_balance_lock"])
+        
+        print("Camera settings applied successfully!")
+        
+        # Log current settings
+        print("Current camera settings:")
+        for key, value in self.settings.items():
+            if key in ["exposure", "iso", "focus", "brightness", "contrast", "saturation", "sharpness", "white_balance", "luma_denoise", "chroma_denoise"]:
+                print(f"  {key}: {value}")
+        
+        print("Auto modes:")
+        for key, value in self.auto_modes.items():
+            print(f"  {key}: {value}")

@@ -95,6 +95,7 @@ class OAKCameraViewer:
                 capture_gps=self.capture_gps_data,
                 toggle_gps_interval=self.toggle_gps_interval_capture,
                 save_dir_change=self.set_save_directory,
+                update_settings=self.update_camera_settings,
                 reset_settings=self.reset_camera_settings,
             )
 
@@ -588,6 +589,14 @@ class OAKCameraViewer:
             self.disconnect_camera()
             time.sleep(1)
             self.connect_camera()
+
+    def update_camera_settings(self):
+        """Apply all pending camera settings"""
+        if self.connected:
+            self.settings_manager.apply_all_settings()
+            self.update_status("Camera settings updated successfully")
+        else:
+            messagebox.showwarning("Not Connected", "Please connect to camera first to apply settings")
 
     def reset_camera_settings(self):
         """Reset all camera settings to defaults"""

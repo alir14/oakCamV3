@@ -22,6 +22,7 @@ class QuickActionsMenu:
         self.on_capture_gps: Optional[Callable] = None
         self.on_toggle_gps_interval: Optional[Callable] = None
         self.on_save_dir_change: Optional[Callable] = None
+        self.on_update_settings: Optional[Callable] = None
         self.on_reset_settings: Optional[Callable] = None
 
         self.setup_quick_actions()
@@ -106,6 +107,14 @@ class QuickActionsMenu:
         )
         self.widgets["save_dir_btn"].pack(side=tk.LEFT, padx=2)
 
+        self.widgets["update_settings_btn"] = ttk.Button(
+            settings_frame,
+            text="⚙️ Update Settings",
+            command=self._on_update_settings_clicked,
+            width=15,
+        )
+        self.widgets["update_settings_btn"].pack(side=tk.LEFT, padx=2)
+
         self.widgets["reset_btn"] = ttk.Button(
             settings_frame,
             text="🔄 Reset Settings",
@@ -186,6 +195,10 @@ class QuickActionsMenu:
     def _on_save_dir_clicked(self):
         if self.on_save_dir_change:
             self.on_save_dir_change()
+
+    def _on_update_settings_clicked(self):
+        if self.on_update_settings:
+            self.on_update_settings()
 
     def _on_reset_clicked(self):
         if self.on_reset_settings:
@@ -728,8 +741,9 @@ class ControlPanel:
             # Label
             ttk.Label(control_frame, text=label, width=15).pack(side=tk.LEFT)
 
-            # Variable
-            var = tk.IntVar(value=self.settings_manager.get_setting(key))
+            # Variable - ensure integer value
+            setting_value = self.settings_manager.get_setting(key)
+            var = tk.IntVar(value=int(setting_value) if setting_value is not None else 0)
             self.widgets[f"{key}_var"] = var
 
             # Scale
@@ -740,7 +754,7 @@ class ControlPanel:
                 variable=var,
                 orient=tk.HORIZONTAL,
                 length=150,
-                command=lambda v, cb=callback, va=var: cb(int(va.get())),
+                command=lambda v, k=key, va=var: self._on_manual_control_changed(k, int(va.get())),
             )
             scale.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
 
@@ -837,6 +851,10 @@ class ControlPanel:
     def _on_white_balance_changed(self, value: int):
         self.settings_manager.set_white_balance(value)
 
+    def _on_manual_control_changed(self, key: str, value: int):
+        """Handle manual control changes - only update settings, don't apply to camera"""
+        self.settings_manager.update_setting(key, value)
+
     def _on_gps_interval_changed(self):
         try:
             val = float(self.widgets["gps_interval_var"].get())
@@ -886,7 +904,7 @@ class ControlPanel:
                 self.settings_manager.get_auto_mode("auto_white_balance_lock")
             )
 
-        # Update manual control values
+        # Update manual control values - ensure integer values
         manual_controls = [
             "exposure",
             "iso",
@@ -903,7 +921,8 @@ class ControlPanel:
         for control in manual_controls:
             var_key = f"{control}_var"
             if var_key in self.widgets:
-                self.widgets[var_key].set(self.settings_manager.get_setting(control))
+                setting_value = self.settings_manager.get_setting(control)
+                self.widgets[var_key].set(int(setting_value) if setting_value is not None else 0)
 
         # Update CAM_A resolution (keep default if not set yet)
         if "cam_a_resolution_var" in self.widgets:

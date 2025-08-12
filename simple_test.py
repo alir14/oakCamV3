@@ -74,10 +74,21 @@ def test_ui_creation():
                     'luma_denoise': 1,
                     'chroma_denoise': 1,
                 }
-                return defaults.get(key, 0)
+                value = defaults.get(key, 0)
+                # Ensure integer values for camera controls
+                if key in ["exposure", "iso", "focus", "brightness", "contrast", "saturation", "sharpness", "white_balance", "luma_denoise", "chroma_denoise"]:
+                    return int(value) if value is not None else 0
+                return value
             
             def get_auto_mode(self, key):
                 return True
+            
+            def update_setting(self, key, value):
+                pass  # Mock implementation
+            
+            def apply_all_settings(self):
+                print("Mock: Applying all camera settings...")
+                print("Mock: Camera settings applied successfully!")
             
             # Add constants
             EXPOSURE_MIN = 1

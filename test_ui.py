@@ -63,7 +63,11 @@ class MockCameraSettingsManager:
     WB_MAX = 12000
 
     def get_setting(self, key):
-        return self.settings.get(key, 0)
+        value = self.settings.get(key, 0)
+        # Ensure integer values for camera controls
+        if key in ["exposure", "iso", "focus", "brightness", "contrast", "saturation", "sharpness", "white_balance", "luma_denoise", "chroma_denoise"]:
+            return int(value) if value is not None else 0
+        return value
 
     def get_auto_mode(self, key):
         return self.auto_modes.get(key, False)
@@ -115,6 +119,21 @@ class MockCameraSettingsManager:
 
     def set_chroma_denoise(self, value):
         print(f"Mock: Set chroma denoise = {value}")
+
+    def update_setting(self, key, value):
+        if key in self.settings:
+            self.settings[key] = value
+
+    def apply_all_settings(self):
+        print("Mock: Applying all camera settings...")
+        print("Mock: Camera settings applied successfully!")
+        print("Mock: Current camera settings:")
+        for key, value in self.settings.items():
+            if key in ["exposure", "iso", "focus", "brightness", "contrast", "saturation", "sharpness", "white_balance", "luma_denoise", "chroma_denoise"]:
+                print(f"  {key}: {value}")
+        print("Mock: Auto modes:")
+        for key, value in self.auto_modes.items():
+            print(f"  {key}: {value}")
 
 
 # Import the actual ControlPanel
