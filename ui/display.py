@@ -330,7 +330,7 @@ class DisplayManager:
         self.camera_info_labels.clear()
 
     def start_display_loop(
-        self, camera_controller: "CameraController", file_manager: "FileManager"
+        self, camera_controller: "CameraController", file_manager: "FileManager", roi_manager=None
     ):
         """Start the display update loop"""
         if self.running:
@@ -339,7 +339,7 @@ class DisplayManager:
         self.running = True
         self.display_thread = threading.Thread(
             target=self._display_loop,
-            args=(camera_controller, file_manager),
+            args=(camera_controller, file_manager, roi_manager),
             daemon=True,
         )
         self.display_thread.start()
@@ -351,7 +351,7 @@ class DisplayManager:
             self.display_thread.join(timeout=1.0)
 
     def _display_loop(
-        self, camera_controller: "CameraController", file_manager: "FileManager"
+        self, camera_controller: "CameraController", file_manager: "FileManager", roi_manager=None
     ):
         """Main display loop"""
         frame_interval = 1.0 / self.target_fps
@@ -363,6 +363,10 @@ class DisplayManager:
                 for camera_name in camera_controller.get_connected_cameras():
                     frame = camera_controller.get_frame(camera_name)
                     if frame is not None:
+                        # Apply ROI overlay if available
+                        if roi_manager:
+                            frame = roi_manager.draw_roi_overlay(frame, camera_name)
+                        
                         # Get frame info if available
                         frame_info = {
                             "width": frame.shape[1],
@@ -448,6 +452,7 @@ class UIManager:
         self.top_frame: Optional[ttk.Frame] = None
         self.paned_window: Optional[ttk.PanedWindow] = None
         self.control_frame: Optional[ttk.LabelFrame] = None
+        self.control_notebook: Optional[ttk.Notebook] = None
         self.display_frame: Optional[ttk.Frame] = None
         self.notebook: Optional[ttk.Notebook] = None
 
@@ -472,12 +477,16 @@ class UIManager:
         self.paned_window = ttk.PanedWindow(self.main_frame, orient=tk.HORIZONTAL)
         self.paned_window.pack(fill=tk.BOTH, expand=True)
 
-        # Left panel for controls
+        # Left panel for controls with notebook
         self.control_frame = ttk.LabelFrame(
             self.paned_window, text="Camera Controls", padding=10
         )
         self.control_frame.configure(width=350)
         self.paned_window.add(self.control_frame, weight=0)
+        
+        # Create notebook for control panels
+        self.control_notebook = ttk.Notebook(self.control_frame)
+        self.control_notebook.pack(fill=tk.BOTH, expand=True)
 
         # Right panel for camera displays
         self.display_frame = ttk.Frame(self.paned_window)
@@ -498,6 +507,10 @@ class UIManager:
     def get_control_frame(self) -> ttk.LabelFrame:
         """Get the control frame for camera controls"""
         return self.control_frame
+
+    def get_control_notebook(self) -> ttk.Notebook:
+        """Get the control notebook for multiple control panels"""
+        return self.control_notebook
 
     def get_display_manager(self) -> DisplayManager:
         """Get the display manager"""

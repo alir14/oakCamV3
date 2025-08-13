@@ -1,6 +1,6 @@
 import sys
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog
 import threading
 import time
 from datetime import datetime
@@ -13,9 +13,11 @@ import platform
 # Import our custom modules
 from camera.controller import CameraController
 from camera.settings import CameraSettingsManager
+from camera.roi_manager import ROIManager
 from utils.file_manager import FileManager
 from ui.display import UIManager, MenuBarManager, StatusBarManager, DisplayManager
 from ui.controls import QuickActionsMenu, ControlPanel
+from ui.roi_controls import ROIControlPanel
 from GPS.gps_integration import GPSIntegration
 
 
@@ -28,6 +30,7 @@ class OAKCameraViewer:
         # Initialize backend components
         self.camera_controller = CameraController()
         self.settings_manager = CameraSettingsManager(self.camera_controller)
+        self.roi_manager = ROIManager(self.camera_controller)
         self.file_manager = FileManager()
         self.gps = GPSIntegration()
 
@@ -35,6 +38,7 @@ class OAKCameraViewer:
         self.ui_manager = UIManager(root)
         self.quick_actions: Optional[QuickActionsMenu] = None
         self.control_panel: Optional[ControlPanel] = None
+        self.roi_control_panel: Optional[ROIControlPanel] = None
 
         # Application state
         self.connected = False
@@ -78,10 +82,18 @@ class OAKCameraViewer:
         # Setup quick actions menu in top frame
         self.quick_actions = QuickActionsMenu(self.ui_manager.get_top_frame())
 
-        # Setup control panel in left frame
-        self.control_panel = ControlPanel(
-            self.ui_manager.get_control_frame(), self.settings_manager
-        )
+        # Setup control notebook
+        control_notebook = self.ui_manager.get_control_notebook()
+        
+        # Setup camera settings control panel
+        camera_frame = ttk.Frame(control_notebook)
+        control_notebook.add(camera_frame, text="Camera Settings")
+        self.control_panel = ControlPanel(camera_frame, self.settings_manager)
+        
+        # Setup ROI control panel
+        roi_frame = ttk.Frame(control_notebook)
+        control_notebook.add(roi_frame, text="ROI")
+        self.roi_control_panel = ROIControlPanel(roi_frame, self.roi_manager)
 
     def setup_callbacks(self):
         """Setup all callback functions"""
@@ -102,6 +114,10 @@ class OAKCameraViewer:
         # Control panel callbacks
         if self.control_panel:
             self.control_panel.set_callbacks(settings_change=self.apply_stream_settings)
+
+        # ROI control panel callbacks
+        if self.roi_control_panel:
+            self.roi_control_panel.set_roi_changed_callback(self.on_roi_changed)
 
         # Menu bar callbacks
         if self.ui_manager.get_menu_bar():
@@ -294,13 +310,21 @@ class OAKCameraViewer:
                 self.root.after(0, lambda: self.update_status("Streaming failed"))
                 return
 
+            # Initialize and start ROI processing
+            self.roi_manager.initialize_for_cameras()
+            self.roi_manager.start_roi_processing()
+            
+            # Refresh ROI control panel
+            if self.roi_control_panel:
+                self.roi_control_panel.refresh_camera_tabs()
+            
             # Start display updates
             display_manager = self.ui_manager.get_display_manager()
             if display_manager:
                 # Ensure display loop targets the selected FPS
                 display_manager.target_fps = current_settings.get("fps", 30)
                 display_manager.start_display_loop(
-                    self.camera_controller, self.file_manager
+                    self.camera_controller, self.file_manager, self.roi_manager
                 )
 
             # Update UI state
@@ -350,6 +374,9 @@ class OAKCameraViewer:
             if self.quick_actions:
                 self.quick_actions.update_recording_status(False)
 
+        # Stop ROI processing
+        self.roi_manager.stop_roi_processing()
+        
         # Stop display updates
         display_manager = self.ui_manager.get_display_manager()
         if display_manager:
@@ -653,6 +680,17 @@ class OAKCameraViewer:
         status_bar = self.ui_manager.get_status_bar()
         if status_bar:
             status_bar.update_status(message)
+
+    def on_roi_changed(self, camera_name: str):
+        """Handle ROI settings changes"""
+        if camera_name == "all":
+            self.update_status("ROI settings reset for all cameras")
+        else:
+            roi_info = self.roi_manager.get_roi_info(camera_name)
+            if roi_info.get("enabled", False):
+                self.update_status(f"ROI updated for {camera_name}")
+            else:
+                self.update_status(f"ROI disabled for {camera_name}")
 
     def on_closing(self):
         """Handle application closing"""

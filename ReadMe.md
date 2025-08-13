@@ -21,6 +21,14 @@ A comprehensive Windows application for Luxonis OAK PoE cameras using DepthAI V3
   - White balance (1000-12000K)
   - Luma/Chroma denoise (0-4)
 
+### 🎯 **ROI (Region of Interest) Controls**
+- **ROI-based Exposure**: Set exposure metering region for better exposure control
+- **ROI-based Focus**: Use ROI for autofocus targeting
+- **Visual Overlay**: Real-time ROI rectangle display on camera feeds
+- **Per-Camera Settings**: Independent ROI settings for each camera
+- **Exposure Compensation**: Fine-tune exposure within ROI (-9 to +9)
+- **Interactive Controls**: Slider-based position and size adjustment
+
 ### 📸 **Capture Capabilities**
 - **Image Capture**: Synchronized capture from all cameras
 - **Video Recording**: Multi-camera video recording
@@ -55,6 +63,11 @@ pip install -r requirements.txt
 python main.py
 ```
 
+4. **Test ROI functionality (optional):**
+```bash
+python test_roi.py
+```
+
 ## Project Structure
 
 ```
@@ -65,10 +78,12 @@ oak_camera_viewer/
 ├── camera/
 │   ├── __init__.py           # Camera module init
 │   ├── controller.py         # CameraController class
-│   └── settings.py           # CameraSettingsManager class
+│   ├── settings.py           # CameraSettingsManager class
+│   └── roi_manager.py        # ROIManager class
 ├── ui/
 │   ├── __init__.py           # UI module init
 │   ├── display.py            # DisplayManager class
-│   └── controls.py           # ControlPanel class
+│   ├── controls.py           # ControlPanel class
+│   └── roi_controls.py       # ROIControlPanel class
 ├── utils/
 │
