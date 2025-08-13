@@ -249,14 +249,14 @@ class ROIControlPanel:
         self.roi_manager.set_roi_overlay_visibility(visible)
 
     def _on_roi_enabled(self, camera_name: str):
-        """Handle ROI enable/disable"""
+        """Handle ROI enable/disable - apply immediately"""
         enabled = self.widgets[f"{camera_name}_enabled_var"].get()
         self.roi_manager.enable_roi(camera_name, enabled)
         if self.on_roi_changed:
             self.on_roi_changed(camera_name)
 
     def _on_focus_toggle(self, camera_name: str):
-        """Handle focus region toggle"""
+        """Handle focus region toggle - apply immediately"""
         enabled = self.widgets[f"{camera_name}_focus_var"].get()
         self.roi_manager.set_focus_region(camera_name, enabled)
         if self.on_roi_changed:
@@ -300,6 +300,9 @@ class ROIControlPanel:
         self.roi_manager.set_exposure_compensation(camera_name, exposure)
         self.roi_manager.enable_roi(camera_name, enabled)
         self.roi_manager.set_focus_region(camera_name, focus_region)
+        
+        # Show feedback
+        print(f"ROI settings applied for {camera_name}: pos=({x:.2f},{y:.2f}), size=({width:.2f}x{height:.2f}), exp={exposure:+d}, enabled={enabled}, focus={focus_region}")
         
         if self.on_roi_changed:
             self.on_roi_changed(camera_name)

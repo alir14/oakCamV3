@@ -101,27 +101,28 @@ class ROIManager:
                 if frame is not None:
                     height, width = frame.shape[:2]
                     
-                    # Calculate ROI rectangle in pixels
-                    roi_x = int(roi_settings.x * width)
-                    roi_y = int(roi_settings.y * height)
+                    # Calculate ROI rectangle in pixels (center-based to corner-based)
+                    roi_center_x = int(roi_settings.x * width)
+                    roi_center_y = int(roi_settings.y * height)
                     roi_w = int(roi_settings.width * width)
                     roi_h = int(roi_settings.height * height)
                     
+                    # Convert center coordinates to top-left corner coordinates
+                    roi_start_x = roi_center_x - roi_w // 2
+                    roi_start_y = roi_center_y - roi_h // 2
+                    
                     # Ensure ROI is within bounds
-                    roi_x = max(0, min(roi_x, width - roi_w))
-                    roi_y = max(0, min(roi_y, height - roi_h))
-                    roi_w = min(roi_w, width - roi_x)
-                    roi_h = min(roi_h, height - roi_y)
+                    roi_start_x = max(0, min(roi_start_x, width - roi_w))
+                    roi_start_y = max(0, min(roi_start_y, height - roi_h))
+                    roi_w = min(roi_w, width - roi_start_x)
+                    roi_h = min(roi_h, height - roi_start_y)
                     
-                    # Create ROI rectangle
-                    roi_rect = dai.Rect(roi_x, roi_y, roi_w, roi_h)
-                    
-                    # Set exposure ROI
-                    ctrl.setAutoExposureRegion(roi_rect)
+                    # Set exposure ROI using individual parameters (like Luxonis example)
+                    ctrl.setAutoExposureRegion(roi_start_x, roi_start_y, roi_w, roi_h)
                     
                     # Set focus ROI if enabled
                     if roi_settings.focus_region:
-                        ctrl.setAutoFocusRegion(roi_rect)
+                        ctrl.setAutoFocusRegion(roi_start_x, roi_start_y, roi_w, roi_h)
                     
                     # Set exposure compensation
                     if roi_settings.exposure_compensation != 0:
@@ -191,27 +192,38 @@ class ROIManager:
             return frame
         
         try:
-            # Convert normalized coordinates to pixel coordinates
+            # Convert normalized coordinates to pixel coordinates (center-based to corner-based)
             height, width = frame.shape[:2]
-            roi_x = int(roi_settings.x * width)
-            roi_y = int(roi_settings.y * height)
+            roi_center_x = int(roi_settings.x * width)
+            roi_center_y = int(roi_settings.y * height)
             roi_w = int(roi_settings.width * width)
             roi_h = int(roi_settings.height * height)
             
+            # Convert center coordinates to top-left corner coordinates
+            roi_start_x = roi_center_x - roi_w // 2
+            roi_start_y = roi_center_y - roi_h // 2
+            
+            # Ensure ROI is within bounds
+            roi_start_x = max(0, min(roi_start_x, width - roi_w))
+            roi_start_y = max(0, min(roi_start_y, height - roi_h))
+            roi_w = min(roi_w, width - roi_start_x)
+            roi_h = min(roi_h, height - roi_start_y)
+            
             # Draw ROI rectangle
-            cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), 
+            cv2.rectangle(frame, (roi_start_x, roi_start_y), 
+                         (roi_start_x + roi_w, roi_start_y + roi_h), 
                          self.roi_color, self.roi_thickness)
             
             # Draw center point
-            center_x = roi_x + roi_w // 2
-            center_y = roi_y + roi_h // 2
+            center_x = roi_start_x + roi_w // 2
+            center_y = roi_start_y + roi_h // 2
             cv2.circle(frame, (center_x, center_y), 3, self.roi_color, -1)
             
             # Add text label
             label = f"ROI: {roi_settings.exposure_compensation:+d}"
             if roi_settings.focus_region:
                 label += " (Focus)"
-            cv2.putText(frame, label, (roi_x, roi_y - 10), 
+            cv2.putText(frame, label, (roi_start_x, roi_start_y - 10), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.roi_color, 1)
             
         except Exception as e:
