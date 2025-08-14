@@ -40,6 +40,17 @@ class ROIManager:
         self.roi_color = (0, 255, 0)  # Green
         self.roi_thickness = 2
         
+        # Mouse interaction settings
+        self.mouse_roi_enabled = False
+        self.mouse_roi_active = False
+        self.mouse_start_point: Optional[Tuple[int, int]] = None
+        self.mouse_current_point: Optional[Tuple[int, int]] = None
+        self.mouse_roi_camera: Optional[str] = None
+        
+        # Settings change tracking
+        self.settings_changed: Dict[str, bool] = {}
+        self.last_applied_settings: Dict[str, Dict] = {}
+        
         # Callback for UI updates
         self.on_roi_updated: Optional[Callable] = None
         
@@ -50,6 +61,9 @@ class ROIManager:
         connected_cameras = self.camera_controller.get_connected_cameras()
         if "CAM_A" in connected_cameras and "CAM_A" not in self.roi_settings:
             self.roi_settings["CAM_A"] = ROISettings()
+            self.settings_changed["CAM_A"] = True
+            self.last_applied_settings["CAM_A"] = {}
+            print("ROI settings initialized for CAM_A")
 
     def initialize_for_cameras(self):
         """Initialize ROI settings for newly connected cameras"""
@@ -80,13 +94,48 @@ class ROIManager:
                 if "CAM_A" in self.roi_settings:
                     roi_settings = self.roi_settings["CAM_A"]
                     if roi_settings.enabled:
-                        self._apply_roi_settings("CAM_A", roi_settings)
+                        # Check if settings have changed or need initial application
+                        if self._settings_have_changed("CAM_A", roi_settings):
+                            print(f"ROI settings changed, applying new settings...")
+                            self._apply_roi_settings("CAM_A", roi_settings)
+                            self._mark_settings_applied("CAM_A", roi_settings)
                 
                 time.sleep(0.1)  # 10 FPS update rate
                 
             except Exception as e:
                 print(f"ROI processing error: {e}")
                 time.sleep(0.1)
+
+    def _settings_have_changed(self, camera_name: str, roi_settings: ROISettings) -> bool:
+        """Check if ROI settings have changed since last application"""
+        if camera_name not in self.last_applied_settings:
+            return True
+        
+        last_settings = self.last_applied_settings[camera_name]
+        current_settings = {
+            'enabled': roi_settings.enabled,
+            'x': roi_settings.x,
+            'y': roi_settings.y,
+            'width': roi_settings.width,
+            'height': roi_settings.height,
+            'exposure_compensation': roi_settings.exposure_compensation,
+            'focus_region': roi_settings.focus_region
+        }
+        
+        return last_settings != current_settings
+
+    def _mark_settings_applied(self, camera_name: str, roi_settings: ROISettings):
+        """Mark that settings have been applied to camera"""
+        self.last_applied_settings[camera_name] = {
+            'enabled': roi_settings.enabled,
+            'x': roi_settings.x,
+            'y': roi_settings.y,
+            'width': roi_settings.width,
+            'height': roi_settings.height,
+            'exposure_compensation': roi_settings.exposure_compensation,
+            'focus_region': roi_settings.focus_region
+        }
+        self.settings_changed[camera_name] = False
 
     def _apply_roi_settings(self, camera_name: str, roi_settings: ROISettings):
         """Apply ROI settings to a specific camera"""
@@ -96,6 +145,9 @@ class ROIManager:
             
             # Set ROI for exposure
             if roi_settings.enabled:
+                # IMPORTANT: ROI requires auto exposure to be enabled
+                ctrl.setAutoExposureEnable()
+                
                 # Convert normalized coordinates to pixel coordinates
                 frame = self.camera_controller.get_frame(camera_name)
                 if frame is not None:
@@ -122,6 +174,8 @@ class ROIManager:
                     
                     # Set focus ROI if enabled
                     if roi_settings.focus_region:
+                        # IMPORTANT: Focus ROI requires auto focus to be enabled
+                        ctrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.CONTINUOUS_VIDEO)
                         ctrl.setAutoFocusRegion(roi_start_x, roi_start_y, roi_w, roi_h)
                     
                     # Set exposure compensation
@@ -131,13 +185,109 @@ class ROIManager:
                     # Send control to camera
                     self.camera_controller.send_control_to_camera(camera_name, ctrl)
                     
+                    print(f"ROI applied to {camera_name}: pos=({roi_start_x},{roi_start_y}), size=({roi_w}x{roi_h}), exp={roi_settings.exposure_compensation:+d}, focus={roi_settings.focus_region}")
+                    
         except Exception as e:
             print(f"ROI application error for {camera_name}: {e}")
+
+    # Mouse interaction methods
+    def enable_mouse_roi(self, enabled: bool):
+        """Enable or disable mouse-based ROI selection"""
+        self.mouse_roi_enabled = enabled
+        if not enabled:
+            self.mouse_roi_active = False
+            self.mouse_start_point = None
+            self.mouse_current_point = None
+            self.mouse_roi_camera = None
+        print(f"Mouse ROI selection {'enabled' if enabled else 'disabled'}")
+
+    def handle_mouse_event(self, camera_name: str, event: str, x: int, y: int, frame_width: int, frame_height: int):
+        """Handle mouse events for ROI selection"""
+        if not self.mouse_roi_enabled or camera_name != "CAM_A":
+            return
+        
+        if event == "mousedown":
+            # Start ROI selection
+            self.mouse_roi_active = True
+            self.mouse_start_point = (x, y)
+            self.mouse_current_point = (x, y)
+            self.mouse_roi_camera = camera_name
+            print(f"ROI selection started at ({x}, {y})")
+            
+        elif event == "mousemove" and self.mouse_roi_active:
+            # Update current mouse position
+            self.mouse_current_point = (x, y)
+            
+        elif event == "mouseup" and self.mouse_roi_active:
+            # End ROI selection and apply
+            self.mouse_roi_active = False
+            if self.mouse_start_point and self.mouse_current_point:
+                self._apply_mouse_roi(camera_name, self.mouse_start_point, self.mouse_current_point, frame_width, frame_height)
+            self.mouse_start_point = None
+            self.mouse_current_point = None
+            self.mouse_roi_camera = None
+
+    def _apply_mouse_roi(self, camera_name: str, start_point: Tuple[int, int], end_point: Tuple[int, int], frame_width: int, frame_height: int):
+        """Apply ROI based on mouse selection"""
+        try:
+            # Calculate ROI rectangle from mouse points
+            x1, y1 = start_point
+            x2, y2 = end_point
+            
+            # Ensure proper order (top-left to bottom-right)
+            roi_start_x = min(x1, x2)
+            roi_start_y = min(y1, y2)
+            roi_end_x = max(x1, x2)
+            roi_end_y = max(y1, y2)
+            
+            # Calculate center and size
+            roi_center_x = (roi_start_x + roi_end_x) // 2
+            roi_center_y = (roi_start_y + roi_end_y) // 2
+            roi_width = roi_end_x - roi_start_x
+            roi_height = roi_end_y - roi_start_y
+            
+            # Convert to normalized coordinates
+            norm_center_x = roi_center_x / frame_width
+            norm_center_y = roi_center_y / frame_height
+            norm_width = roi_width / frame_width
+            norm_height = roi_height / frame_height
+            
+            # Ensure minimum size
+            min_size = 0.05  # 5% of frame
+            norm_width = max(norm_width, min_size)
+            norm_height = max(norm_height, min_size)
+            
+            print(f"Mouse ROI selection: raw=({roi_start_x},{roi_start_y})-({roi_end_x},{roi_end_y}), normalized=({norm_center_x:.3f},{norm_center_y:.3f}) size=({norm_width:.3f}x{norm_height:.3f})")
+            
+            # Update ROI settings
+            if camera_name in self.roi_settings:
+                old_settings = self.roi_settings[camera_name]
+                print(f"Previous ROI settings: pos=({old_settings.x:.3f},{old_settings.y:.3f}), size=({old_settings.width:.3f}x{old_settings.height:.3f}), enabled={old_settings.enabled}")
+                
+                self.roi_settings[camera_name].x = norm_center_x
+                self.roi_settings[camera_name].y = norm_center_y
+                self.roi_settings[camera_name].width = norm_width
+                self.roi_settings[camera_name].height = norm_height
+                self.roi_settings[camera_name].enabled = True
+                
+                # Mark settings as changed to force re-application
+                self.settings_changed[camera_name] = True
+                
+                # Notify UI of changes
+                if self.on_roi_updated:
+                    self.on_roi_updated(camera_name, self.roi_settings[camera_name])
+                
+                print(f"New ROI settings applied: pos=({norm_center_x:.3f},{norm_center_y:.3f}), size=({norm_width:.3f}x{norm_height:.3f}), enabled=True")
+                
+        except Exception as e:
+            print(f"Mouse ROI application error: {e}")
 
     def set_roi_settings(self, camera_name: str, settings: ROISettings):
         """Set ROI settings for a specific camera"""
         if camera_name in self.roi_settings:
             self.roi_settings[camera_name] = settings
+            self.settings_changed[camera_name] = True
+            print(f"ROI settings updated for {camera_name}: pos=({settings.x:.3f},{settings.y:.3f}), size=({settings.width:.3f}x{settings.height:.3f}), enabled={settings.enabled}")
             if self.on_roi_updated:
                 self.on_roi_updated(camera_name, settings)
 
@@ -148,37 +298,52 @@ class ROIManager:
     def enable_roi(self, camera_name: str, enabled: bool):
         """Enable or disable ROI for a camera"""
         if camera_name in self.roi_settings:
+            old_enabled = self.roi_settings[camera_name].enabled
             self.roi_settings[camera_name].enabled = enabled
+            self.settings_changed[camera_name] = True
+            print(f"ROI {'enabled' if enabled else 'disabled'} for {camera_name} (was {old_enabled})")
             if self.on_roi_updated:
                 self.on_roi_updated(camera_name, self.roi_settings[camera_name])
 
     def set_roi_position(self, camera_name: str, x: float, y: float):
         """Set ROI center position (normalized coordinates)"""
         if camera_name in self.roi_settings:
+            old_x, old_y = self.roi_settings[camera_name].x, self.roi_settings[camera_name].y
             self.roi_settings[camera_name].x = max(0.0, min(1.0, x))
             self.roi_settings[camera_name].y = max(0.0, min(1.0, y))
+            self.settings_changed[camera_name] = True
+            print(f"ROI position changed for {camera_name}: ({old_x:.3f},{old_y:.3f}) -> ({x:.3f},{y:.3f})")
             if self.on_roi_updated:
                 self.on_roi_updated(camera_name, self.roi_settings[camera_name])
 
     def set_roi_size(self, camera_name: str, width: float, height: float):
         """Set ROI size (normalized coordinates)"""
         if camera_name in self.roi_settings:
+            old_width, old_height = self.roi_settings[camera_name].width, self.roi_settings[camera_name].height
             self.roi_settings[camera_name].width = max(0.1, min(1.0, width))
             self.roi_settings[camera_name].height = max(0.1, min(1.0, height))
+            self.settings_changed[camera_name] = True
+            print(f"ROI size changed for {camera_name}: ({old_width:.3f}x{old_height:.3f}) -> ({width:.3f}x{height:.3f})")
             if self.on_roi_updated:
                 self.on_roi_updated(camera_name, self.roi_settings[camera_name])
 
     def set_exposure_compensation(self, camera_name: str, compensation: int):
         """Set exposure compensation (-9 to 9)"""
         if camera_name in self.roi_settings:
+            old_comp = self.roi_settings[camera_name].exposure_compensation
             self.roi_settings[camera_name].exposure_compensation = max(-9, min(9, compensation))
+            self.settings_changed[camera_name] = True
+            print(f"ROI exposure compensation changed for {camera_name}: {old_comp:+d} -> {compensation:+d}")
             if self.on_roi_updated:
                 self.on_roi_updated(camera_name, self.roi_settings[camera_name])
 
     def set_focus_region(self, camera_name: str, enabled: bool):
         """Enable or disable ROI for focus control"""
         if camera_name in self.roi_settings:
+            old_focus = self.roi_settings[camera_name].focus_region
             self.roi_settings[camera_name].focus_region = enabled
+            self.settings_changed[camera_name] = True
+            print(f"ROI focus region {'enabled' if enabled else 'disabled'} for {camera_name} (was {old_focus})")
             if self.on_roi_updated:
                 self.on_roi_updated(camera_name, self.roi_settings[camera_name])
 
@@ -226,6 +391,17 @@ class ROIManager:
             cv2.putText(frame, label, (roi_start_x, roi_start_y - 10), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.roi_color, 1)
             
+            # Draw mouse selection rectangle if active
+            if self.mouse_roi_active and self.mouse_roi_camera == camera_name:
+                if self.mouse_start_point and self.mouse_current_point:
+                    # Draw selection rectangle
+                    cv2.rectangle(frame, self.mouse_start_point, self.mouse_current_point, 
+                                 (255, 0, 0), 2)  # Blue for selection
+                    
+                    # Draw selection text
+                    cv2.putText(frame, "Selecting ROI...", (10, 30), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+            
         except Exception as e:
             print(f"ROI overlay drawing error: {e}")
         
@@ -235,6 +411,8 @@ class ROIManager:
         """Reset ROI settings to defaults for a camera"""
         if camera_name in self.roi_settings:
             self.roi_settings[camera_name] = ROISettings()
+            self.settings_changed[camera_name] = True
+            print(f"ROI settings reset for {camera_name}")
             if self.on_roi_updated:
                 self.on_roi_updated(camera_name, self.roi_settings[camera_name])
 
@@ -268,3 +446,11 @@ class ROIManager:
     def set_roi_overlay_thickness(self, thickness: int):
         """Set ROI overlay line thickness"""
         self.roi_thickness = max(1, thickness)
+
+    def is_mouse_roi_enabled(self) -> bool:
+        """Check if mouse ROI selection is enabled"""
+        return self.mouse_roi_enabled
+
+    def is_mouse_roi_active(self) -> bool:
+        """Check if mouse ROI selection is currently active"""
+        return self.mouse_roi_active

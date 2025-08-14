@@ -5,7 +5,7 @@ import threading
 import time
 import numpy as np
 from PIL import Image, ImageTk
-from typing import Dict, Optional, TYPE_CHECKING, Callable
+from typing import Dict, Optional, TYPE_CHECKING, Callable, Tuple
 from pathlib import Path
 
 if TYPE_CHECKING:
@@ -210,6 +210,11 @@ class DisplayManager:
         self._camera_last_update: Dict[str, float] = {}
         self._camera_current_fps: Dict[str, float] = {}
 
+        # Mouse event handling for ROI
+        self.roi_manager = None
+        self._camera_display_sizes: Dict[str, Tuple[int, int]] = {}  # Store actual display sizes
+        self._camera_frame_sizes: Dict[str, Tuple[int, int]] = {}    # Store original frame sizes
+
     def setup_camera_tab(self, camera_name: str):
         """Setup display tab for a camera"""
         frame = ttk.Frame(self.notebook)
@@ -247,22 +252,84 @@ class DisplayManager:
         )
         image_label.pack(expand=True)
 
+        # Bind mouse events for ROI selection (only for CAM_A)
+        if camera_name == "CAM_A":
+            image_label.bind("<Button-1>", lambda e: self._on_mouse_down(camera_name, e))
+            image_label.bind("<B1-Motion>", lambda e: self._on_mouse_move(camera_name, e))
+            image_label.bind("<ButtonRelease-1>", lambda e: self._on_mouse_up(camera_name, e))
+
         self.camera_frames[camera_name] = image_label
 
         # Store fps label reference for updates
         self.camera_frames[f"{camera_name}_fps"] = fps_label
+
+    def _on_mouse_down(self, camera_name: str, event):
+        """Handle mouse button press for ROI selection"""
+        if self.roi_manager and camera_name == "CAM_A":
+            # Convert display coordinates to frame coordinates
+            frame_x, frame_y = self._display_to_frame_coords(camera_name, event.x, event.y)
+            if frame_x is not None and frame_y is not None:
+                self.roi_manager.handle_mouse_event(camera_name, "mousedown", frame_x, frame_y, 
+                                                   self._camera_frame_sizes.get(camera_name, (640, 480))[0],
+                                                   self._camera_frame_sizes.get(camera_name, (640, 480))[1])
+
+    def _on_mouse_move(self, camera_name: str, event):
+        """Handle mouse movement for ROI selection"""
+        if self.roi_manager and camera_name == "CAM_A":
+            # Convert display coordinates to frame coordinates
+            frame_x, frame_y = self._display_to_frame_coords(camera_name, event.x, event.y)
+            if frame_x is not None and frame_y is not None:
+                self.roi_manager.handle_mouse_event(camera_name, "mousemove", frame_x, frame_y,
+                                                   self._camera_frame_sizes.get(camera_name, (640, 480))[0],
+                                                   self._camera_frame_sizes.get(camera_name, (640, 480))[1])
+
+    def _on_mouse_up(self, camera_name: str, event):
+        """Handle mouse button release for ROI selection"""
+        if self.roi_manager and camera_name == "CAM_A":
+            # Convert display coordinates to frame coordinates
+            frame_x, frame_y = self._display_to_frame_coords(camera_name, event.x, event.y)
+            if frame_x is not None and frame_y is not None:
+                self.roi_manager.handle_mouse_event(camera_name, "mouseup", frame_x, frame_y,
+                                                   self._camera_frame_sizes.get(camera_name, (640, 480))[0],
+                                                   self._camera_frame_sizes.get(camera_name, (640, 480))[1])
+
+    def _display_to_frame_coords(self, camera_name: str, display_x: int, display_y: int) -> Tuple[Optional[int], Optional[int]]:
+        """Convert display coordinates to original frame coordinates"""
+        if camera_name not in self._camera_display_sizes or camera_name not in self._camera_frame_sizes:
+            return None, None
+        
+        display_width, display_height = self._camera_display_sizes[camera_name]
+        frame_width, frame_height = self._camera_frame_sizes[camera_name]
+        
+        # Calculate scaling factors
+        scale_x = frame_width / display_width
+        scale_y = frame_height / display_height
+        
+        # Convert coordinates
+        frame_x = int(display_x * scale_x)
+        frame_y = int(display_y * scale_y)
+        
+        # Ensure coordinates are within frame bounds
+        frame_x = max(0, min(frame_x, frame_width - 1))
+        frame_y = max(0, min(frame_y, frame_height - 1))
+        
+        return frame_x, frame_y
 
     def update_camera_display(
         self, camera_name: str, image: np.ndarray, frame_info: Optional[Dict] = None
     ):
         """Update camera display with new image and info"""
         try:
+            # Store original frame size
+            original_height, original_width = image.shape[:2]
+            self._camera_frame_sizes[camera_name] = (original_width, original_height)
+
             # Convert BGR to RGB
             img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
             # Calculate display size maintaining aspect ratio
-            original_height, original_width = img_rgb.shape[:2]
             display_height = int(original_height * self.display_width / original_width)
+            self._camera_display_sizes[camera_name] = (self.display_width, display_height)
 
             # Resize for display
             img_display = cv2.resize(img_rgb, (self.display_width, display_height))
@@ -328,6 +395,8 @@ class DisplayManager:
             self.notebook.forget(child)
         self.camera_frames.clear()
         self.camera_info_labels.clear()
+        self._camera_display_sizes.clear()
+        self._camera_frame_sizes.clear()
 
     def start_display_loop(
         self, camera_controller: "CameraController", file_manager: "FileManager", roi_manager=None
@@ -337,6 +406,7 @@ class DisplayManager:
             return
 
         self.running = True
+        self.roi_manager = roi_manager  # Store reference to ROI manager
         self.display_thread = threading.Thread(
             target=self._display_loop,
             args=(camera_controller, file_manager, roi_manager),

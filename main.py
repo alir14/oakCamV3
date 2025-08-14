@@ -314,10 +314,6 @@ class OAKCameraViewer:
             self.roi_manager.initialize_for_cameras()
             self.roi_manager.start_roi_processing()
             
-            # Refresh ROI control panel
-            if self.roi_control_panel:
-                self.roi_control_panel.refresh_camera_tabs()
-            
             # Start display updates
             display_manager = self.ui_manager.get_display_manager()
             if display_manager:
@@ -685,12 +681,27 @@ class OAKCameraViewer:
         """Handle ROI settings changes"""
         if camera_name == "all":
             self.update_status("ROI settings reset for all cameras")
+            # Update UI controls for all cameras
+            if self.roi_control_panel:
+                for cam in self.roi_control_panel.camera_tabs:
+                    self.roi_control_panel._update_controls_from_settings(cam)
+        elif camera_name == "mouse_roi":
+            self.update_status("Mouse ROI selection toggled")
+            # Update mouse ROI status in UI
+            if self.roi_control_panel:
+                self.roi_control_panel.update_mouse_roi_status()
         else:
             roi_info = self.roi_manager.get_roi_info(camera_name)
             if roi_info.get("enabled", False):
                 self.update_status(f"ROI updated for {camera_name}")
+                # Update UI controls for this camera
+                if self.roi_control_panel and camera_name in self.roi_control_panel.camera_tabs:
+                    self.roi_control_panel._update_controls_from_settings(camera_name)
             else:
                 self.update_status(f"ROI disabled for {camera_name}")
+                # Update UI controls for this camera
+                if self.roi_control_panel and camera_name in self.roi_control_panel.camera_tabs:
+                    self.roi_control_panel._update_controls_from_settings(camera_name)
 
     def on_closing(self):
         """Handle application closing"""
