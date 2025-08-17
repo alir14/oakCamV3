@@ -399,7 +399,8 @@ class DisplayManager:
         self._camera_frame_sizes.clear()
 
     def start_display_loop(
-        self, camera_controller: "CameraController", file_manager: "FileManager", roi_manager=None
+        self, camera_controller: "CameraController", file_manager: "FileManager", 
+        roi_manager=None, lane_detector=None, lane_visualizer=None
     ):
         """Start the display update loop"""
         if self.running:
@@ -407,9 +408,11 @@ class DisplayManager:
 
         self.running = True
         self.roi_manager = roi_manager  # Store reference to ROI manager
+        self.lane_detector = lane_detector  # Store reference to lane detector
+        self.lane_visualizer = lane_visualizer  # Store reference to lane visualizer
         self.display_thread = threading.Thread(
             target=self._display_loop,
-            args=(camera_controller, file_manager, roi_manager),
+            args=(camera_controller, file_manager, roi_manager, lane_detector, lane_visualizer),
             daemon=True,
         )
         self.display_thread.start()
@@ -421,7 +424,8 @@ class DisplayManager:
             self.display_thread.join(timeout=1.0)
 
     def _display_loop(
-        self, camera_controller: "CameraController", file_manager: "FileManager", roi_manager=None
+        self, camera_controller: "CameraController", file_manager: "FileManager", 
+        roi_manager=None, lane_detector=None, lane_visualizer=None
     ):
         """Main display loop"""
         frame_interval = 1.0 / self.target_fps
@@ -436,6 +440,12 @@ class DisplayManager:
                         # Apply ROI overlay if available
                         if roi_manager:
                             frame = roi_manager.draw_roi_overlay(frame, camera_name)
+                        
+                        # Apply lane detection visualization if available
+                        if lane_detector and lane_visualizer and lane_detector.is_running():
+                            lane_results = lane_detector.get_latest_results(camera_name)
+                            if lane_results is not None:
+                                frame = lane_visualizer.draw_lanes(frame, lane_results, camera_name)
                         
                         # Get frame info if available
                         frame_info = {

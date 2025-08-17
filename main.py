@@ -18,6 +18,9 @@ from utils.file_manager import FileManager
 from ui.display import UIManager, MenuBarManager, StatusBarManager, DisplayManager
 from ui.controls import QuickActionsMenu, ControlPanel
 from ui.roi_controls import ROIControlPanel
+from ui.lane_controls import LaneControlPanel
+from lane_detection.lane_detector import LaneDetector
+from lane_detection.lane_visualizer import LaneVisualizer
 from GPS.gps_integration import GPSIntegration
 
 
@@ -31,6 +34,8 @@ class OAKCameraViewer:
         self.camera_controller = CameraController()
         self.settings_manager = CameraSettingsManager(self.camera_controller)
         self.roi_manager = ROIManager(self.camera_controller)
+        self.lane_detector = LaneDetector(self.camera_controller)
+        self.lane_visualizer = LaneVisualizer()
         self.file_manager = FileManager()
         self.gps = GPSIntegration()
 
@@ -39,6 +44,7 @@ class OAKCameraViewer:
         self.quick_actions: Optional[QuickActionsMenu] = None
         self.control_panel: Optional[ControlPanel] = None
         self.roi_control_panel: Optional[ROIControlPanel] = None
+        self.lane_control_panel: Optional[LaneControlPanel] = None
 
         # Application state
         self.connected = False
@@ -94,6 +100,11 @@ class OAKCameraViewer:
         roi_frame = ttk.Frame(control_notebook)
         control_notebook.add(roi_frame, text="ROI")
         self.roi_control_panel = ROIControlPanel(roi_frame, self.roi_manager)
+        
+        # Setup Lane Detection control panel
+        lane_frame = ttk.Frame(control_notebook)
+        control_notebook.add(lane_frame, text="Lane Detection")
+        self.lane_control_panel = LaneControlPanel(lane_frame, self.lane_detector, self.lane_visualizer)
 
     def setup_callbacks(self):
         """Setup all callback functions"""
@@ -118,6 +129,13 @@ class OAKCameraViewer:
         # ROI control panel callbacks
         if self.roi_control_panel:
             self.roi_control_panel.set_roi_changed_callback(self.on_roi_changed)
+            
+        # Lane Detection control panel callbacks
+        if self.lane_control_panel:
+            self.lane_control_panel.set_lane_detection_callback(self.on_lane_detection_changed)
+            
+        # Lane Detection result callback
+        self.lane_detector.set_detection_callback(self.on_lane_detection_result)
 
         # Menu bar callbacks
         if self.ui_manager.get_menu_bar():
@@ -320,7 +338,8 @@ class OAKCameraViewer:
                 # Ensure display loop targets the selected FPS
                 display_manager.target_fps = current_settings.get("fps", 30)
                 display_manager.start_display_loop(
-                    self.camera_controller, self.file_manager, self.roi_manager
+                    self.camera_controller, self.file_manager, self.roi_manager,
+                    self.lane_detector, self.lane_visualizer
                 )
 
             # Update UI state
@@ -372,6 +391,9 @@ class OAKCameraViewer:
 
         # Stop ROI processing
         self.roi_manager.stop_roi_processing()
+        
+        # Stop Lane Detection
+        self.lane_detector.stop_detection()
         
         # Stop display updates
         display_manager = self.ui_manager.get_display_manager()
@@ -702,6 +724,25 @@ class OAKCameraViewer:
                 # Update UI controls for this camera
                 if self.roi_control_panel and camera_name in self.roi_control_panel.camera_tabs:
                     self.roi_control_panel._update_controls_from_settings(camera_name)
+
+    def on_lane_detection_changed(self, event_type: str, value):
+        """Handle lane detection settings changes"""
+        if event_type == "detection_toggle":
+            status = "enabled" if value else "disabled"
+            self.update_status(f"Lane detection {status}")
+        elif event_type == "confidence":
+            self.update_status(f"Lane detection confidence: {value:.1f}")
+        elif event_type == "visualization":
+            self.update_status("Lane visualization options updated")
+        elif event_type == "thickness":
+            self.update_status(f"Lane line thickness: {value}")
+        elif event_type == "reset":
+            self.update_status("Lane detection settings reset")
+
+    def on_lane_detection_result(self, camera_name: str, lanes):
+        """Handle lane detection results"""
+        if lanes is not None and len(lanes) > 0:
+            self.update_status(f"Lane detection: {len(lanes)} lanes detected on {camera_name}")
 
     def on_closing(self):
         """Handle application closing"""
